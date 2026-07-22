@@ -1,0 +1,22 @@
+[package]
+name = "wasmi_cabi"
+version = "0.1.0"
+edition = "2021"
+description = "Thin C ABI shim over wasmi for the Tanuki iOS WASM source engine."
+publish = false
+
+[lib]
+name = "wasmi_cabi"
+# staticlib → a .a that Kotlin/Native links into the iOS framework via cinterop + linkerOpts.
+crate-type = ["staticlib"]
+
+[profile.release]
+# Smaller artifact in the framework; the interpreter isn't perf-critical (heavy bytes are host-side).
+opt-level = "z"
+lto = true
+strip = true
+
+[dependencies]
+# The embedded interpreter (see docs/wasm-engine-decision / ios-wasmi-plan). Pure Rust, no_std-capable;
+# default features (std) — fine on iOS.
+wasmi = "1.1.0"

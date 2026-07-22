@@ -1,0 +1,23 @@
+[package]
+name = "tanuki-source-api"
+version = "0.1.0"
+edition = "2021"
+description = "Guest-side SDK for Tanuki WASM sources — the other half of app.tanuki.core.source.abi."
+publish = false
+
+[lib]
+# rlib: this is linked into each source crate, which is itself the cdylib compiled to .wasm.
+crate-type = ["rlib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Bodies cross the ABI base64-encoded so binary survives the JSON hop.
+base64 = "0.22"
+
+[profile.release]
+# Sources are downloaded over the network, so size matters more than speed — the heavy work
+# (HTTP, image bytes) happens host-side anyway.
+opt-level = "z"
+lto = true
+strip = true

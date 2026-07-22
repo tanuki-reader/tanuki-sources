@@ -1,0 +1,18 @@
+[package]
+name = "tanuki-source-hello"
+version = "0.1.0"
+edition = "2021"
+description = "Smallest possible Tanuki source — proves the memory ABI works end to end."
+publish = false
+
+[lib]
+# cdylib is what produces a standalone .wasm on the wasm32-unknown-unknown target.
+crate-type = ["cdylib"]
+
+[dependencies]
+tanuki-source-api = { path = "../../source-api" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
