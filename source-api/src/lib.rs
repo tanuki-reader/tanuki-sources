@@ -18,7 +18,7 @@
 //!
 //!     fn manga_list(request: MangaListRequest) -> Result<MangaPage, AbiError> {
 //!         let response = fetch(&HttpRequest::get("https://example.com/popular"))?;
-//!         let json: serde_json::Value = serde_json::from_slice(&response.body()?)
+//!         let json: serde_json::Value = serde_json::from_slice(response.body())
 //!             .map_err(|e| AbiError::with_code(e.to_string(), "parse"))?;
 //!         /* map json → MangaPage */
 //!     }
@@ -46,8 +46,6 @@ mod wire;
 pub use abi::ABI_VERSION;
 pub use wire::*;
 
-use base64::Engine as _;
-
 /// Performs an HTTP request through the host and returns its response.
 ///
 /// Synchronous from the guest's perspective — the host blocks a worker thread on a suspending Ktor
@@ -58,28 +56,63 @@ pub fn fetch(request: &HttpRequest) -> Result<HttpResponse, AbiError> {
         .map_err(|e| AbiError::with_code(format!("Could not encode request: {e}"), "encode"))?;
 
     // The host reads these bytes out of our memory; `body` stays alive across the call, and the
-    // reply comes back in a host-allocated buffer that take_from_host frees for us.
+    // reply comes back in a host-allocated buffer that take_from_host adopts (and later frees).
     let packed = unsafe { abi::http_request(body.as_ptr() as i32, body.len() as i32) };
-    let reply = unsafe { abi::take_from_host(packed) };
+    let frame = unsafe { abi::take_from_host(packed) };
 
-    if reply.is_empty() {
+    if frame.is_empty() {
         return Err(AbiError::with_code("Host returned an empty HTTP response.", "http"));
     }
-    serde_json::from_slice(&reply)
-        .map_err(|e| AbiError::with_code(format!("Could not decode response: {e}"), "parse"))
+    decode_frame(frame)
+}
+
+/// Bytes preceding the header JSON in a reply frame: `status` and `headersLength`, both little-endian
+/// `i32`. Mirrors `HttpFrame.PREFIX_BYTES` on the host.
+const FRAME_PREFIX_BYTES: usize = 8;
+
+/// Decodes the `http_request` reply frame — `[status][headersLength][headers JSON][body…]`.
+///
+/// Only the fixed prefix and the (small) header JSON are read here; the body is left in place and
+/// addressed by offset, so a response of any size costs the same nothing to "decode". See
+/// `HttpFrame.kt` on the host for the layout and the measurements that motivated it.
+fn decode_frame(frame: Vec<u8>) -> Result<HttpResponse, AbiError> {
+    let malformed =
+        |what: &str| AbiError::with_code(format!("Malformed HTTP response frame: {what}."), "parse");
+
+    if frame.len() < FRAME_PREFIX_BYTES {
+        return Err(malformed("shorter than its header"));
+    }
+    let read_i32 = |at: usize| i32::from_le_bytes([frame[at], frame[at + 1], frame[at + 2], frame[at + 3]]);
+
+    let status = read_i32(0);
+    let headers_len = read_i32(4);
+    if headers_len < 0 {
+        return Err(malformed("negative header length"));
+    }
+    let body_offset = FRAME_PREFIX_BYTES + headers_len as usize;
+    if body_offset > frame.len() {
+        return Err(malformed("header length past the end of the frame"));
+    }
+
+    let headers = if headers_len == 0 {
+        std::collections::BTreeMap::new()
+    } else {
+        serde_json::from_slice(&frame[FRAME_PREFIX_BYTES..body_offset])
+            .map_err(|e| AbiError::with_code(format!("Could not decode response headers: {e}"), "parse"))?
+    };
+
+    Ok(HttpResponse { status, headers, frame, body_offset })
 }
 
 impl HttpResponse {
-    /// The decoded response body.
-    pub fn body(&self) -> Result<Vec<u8>, AbiError> {
-        base64::engine::general_purpose::STANDARD
-            .decode(&self.body_base64)
-            .map_err(|e| AbiError::with_code(format!("Malformed base64 body: {e}"), "parse"))
+    /// The response body, borrowed straight out of the host's buffer — no copy, no decode.
+    pub fn body(&self) -> &[u8] {
+        &self.frame[self.body_offset..]
     }
 
     /// The response body as UTF-8 text, lossily decoded — HTML in the wild is rarely clean.
-    pub fn text(&self) -> Result<String, AbiError> {
-        Ok(String::from_utf8_lossy(&self.body()?).into_owned())
+    pub fn text(&self) -> String {
+        String::from_utf8_lossy(self.body()).into_owned()
     }
 }
 

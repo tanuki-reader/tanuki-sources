@@ -21,7 +21,7 @@ use std::alloc::Layout;
 
 /// ABI revision this SDK speaks. Must equal `SourceAbi.VERSION` on the host, which refuses to run a
 /// guest reporting anything else.
-pub const ABI_VERSION: i32 = 2;
+pub const ABI_VERSION: i32 = 4;
 
 /// Allocates `size` bytes in linear memory and returns the pointer as an `i32`.
 ///
@@ -102,19 +102,24 @@ pub unsafe fn borrow_from_host<'a>(ptr: i32, len: i32) -> &'a [u8] {
     std::slice::from_raw_parts(ptr as *const u8, len as usize)
 }
 
-/// Takes ownership of a host-allocated reply buffer: copies it out and frees the original. Used for
+/// Takes ownership of a host-allocated reply buffer, **without copying it**. Used for
 /// [`http_request`] replies, which (unlike export inputs) the guest is responsible for freeing.
 ///
+/// The `Vec` adopts the host's allocation rather than duplicating it: the host obtained the region
+/// from [`alloc`], i.e. this crate's global allocator with a size-`len`, align-1 layout, which is
+/// exactly the layout `Vec<u8>`'s own drop will free it with. Dropping the returned `Vec` therefore
+/// *is* the [`dealloc`] call, and doing it this way keeps a multi-hundred-KB response body from being
+/// memcpy'd through the interpreter for no reason.
+///
 /// # Safety
-/// Caller must pass a packed value produced by the host's `http_request` import.
+/// Caller must pass a packed value produced by the host's `http_request` import, exactly once — the
+/// returned `Vec` owns the region and frees it, so adopting the same pointer twice is a double free.
 pub unsafe fn take_from_host(packed: i64) -> Vec<u8> {
     let (ptr, len) = unpack(packed);
     if ptr == 0 || len <= 0 {
         return Vec::new();
     }
-    let owned = std::slice::from_raw_parts(ptr as *const u8, len as usize).to_vec();
-    dealloc(ptr, len);
-    owned
+    Vec::from_raw_parts(ptr as *mut u8, len as usize, len as usize)
 }
 
 // --- Host imports -------------------------------------------------------------------------------
@@ -124,7 +129,8 @@ pub unsafe fn take_from_host(packed: i64) -> Vec<u8> {
 #[link(wasm_import_module = "tanuki")]
 extern "C" {
     /// `http_request(ptr,len) -> packed(ptr,len)`. Input is `HttpRequest` JSON in *guest* memory;
-    /// the reply is `HttpResponse` JSON in a host-allocated buffer the guest must free.
+    /// the reply is a **binary frame** (status, header JSON, then the raw body — see `HttpFrame.kt`
+    /// on the host) in a host-allocated buffer the guest must free.
     ///
     /// Synchronous from here — the host blocks its worker thread on a suspending Ktor call.
     pub fn http_request(ptr: i32, len: i32) -> i64;

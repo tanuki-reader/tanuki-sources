@@ -19,15 +19,15 @@ impl Source for Hello {
             name: "Hello".to_string(),
             lang: "en".to_string(),
             base_url: Some("https://example.com".to_string()),
-            version: Some(1),
+            version: Some(2),
+            // No icon: the app falls back to a lettered avatar, which is the path worth exercising
+            // here since a real source (mangadex) covers the other one.
+            icon_url: None,
             nsfw: false,
-            // Two tabs so the Browse screen has something to render once it exists. Neither is
-            // backed by manga_list yet — the default impl reports "unsupported", which is the
-            // behaviour we want to see surface cleanly in the UI.
-            listings: vec![
-                Listing { key: "popular".to_string(), name: "Popular".to_string() },
-                Listing { key: "latest".to_string(), name: "Latest Updates".to_string() },
-            ],
+            // Both contract listings, so the Browse screen has two tabs to render. Neither is backed
+            // by manga_list yet — the default impl reports "unsupported", which is the behaviour we
+            // want to see surface cleanly in the UI.
+            listings: vec![Listing::Popular, Listing::Latest],
         }
     }
 }

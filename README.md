@@ -61,5 +61,8 @@ host imports). A source never touches it.
 - **Never panic.** A panic aborts the module and the host sees an opaque trap. Return `AbiError`.
 - **Bump `version` in `meta()`** on every release — it's what drives update detection.
 - **`Wire.kt` and `wire.rs` must agree.** Nothing enforces it. Change both in one commit.
+- **Listings are the contract's, not yours.** `meta()` declares which of the `Listing` variants
+  (`Popular`, `Latest`) your source serves — you can't invent one or label it. The app owns the tab
+  name so it can be translated. Serve none and the app shows your default catalog with no tabs.
 - **Bump `ABI_VERSION` and `SourceAbi.VERSION` together.** The host refuses a mismatched guest at
   load time, which is the intended failure — loud, not silent.

@@ -66,19 +66,34 @@ pub struct SourceMeta {
     /// Monotonic version for update checks. Bump on every release of this source.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<i32>,
+    /// Remote URL of the source's icon, shown beside its name in the source list. Omit it and the app
+    /// draws a lettered avatar instead. Must be a format the app can decode — a PNG/JPEG/WebP; an
+    /// `.ico` or `.svg` favicon will not render.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon_url: Option<String>,
     pub nsfw: bool,
-    /// Browse tabs this source offers. Empty means "only a default catalog".
+    /// Which of the contract's [`Listing`]s this source serves. Empty means "only a default catalog".
+    /// Declaration order is ignored — the app renders them in the contract's own order.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub listings: Vec<Listing>,
 }
 
-/// One browse tab a source declares. Mirrors `Wire.ListingWire`.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Listing {
-    /// Echoed back in [`MangaListRequest::listing`]. Opaque to the app.
-    pub key: String,
-    pub name: String,
+/// The **closed set** of browse tabs the contract defines. Mirrors the host's `SourceListing` enum;
+/// on the wire it is the plain string the host's `Wire` carries.
+///
+/// A source does not invent listings: it declares which of these it serves in [`SourceMeta::listings`],
+/// and receives one back in [`MangaListRequest::listing`]. That is what lets the app know up front what
+/// a source can be asked for — it only decides *which* of a known set to show (both, one, or neither).
+///
+/// Travels as its lowercase name (`"popular"`, `"latest"`), per the ABI's "enums travel as their string
+/// name" rule, so adding a variant later doesn't disturb the existing two.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Listing {
+    /// The source's most-followed/most-read series.
+    Popular,
+    /// The source's most recently updated series.
+    Latest,
 }
 
 /// A catalog/search entry. Mirrors `Wire.MangaWire`.
@@ -101,7 +116,7 @@ pub struct Manga {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     /// Must match a `PublishStatus` name (`ONGOING`, `COMPLETED`, `HIATUS`, …) case-insensitively;
-    /// anything unrecognised maps to `UNKNOWN` host-side rather than failing.
+    /// anything unrecognized maps to `UNKNOWN` host-side rather than failing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
 }
@@ -154,9 +169,25 @@ pub struct MangaListRequest {
     pub query: Option<String>,
     /// 1-based page index.
     pub page: i32,
-    /// Which declared listing to browse; `None` means your default catalog. If you don't recognise
-    /// the key, fall back to the default rather than erroring.
-    pub listing: Option<String>,
+    /// Which [`Listing`] to browse; `None` means your default catalog. The host only ever sends one you
+    /// declared in [`SourceMeta::listings`], and a variant this build doesn't know decodes to `None`
+    /// (see [`lenient_listing`]) rather than failing the whole request.
+    #[serde(deserialize_with = "lenient_listing")]
+    pub listing: Option<Listing>,
+}
+
+/// Decodes [`MangaListRequest::listing`], degrading an unrecognized value to `None` — a guest built
+/// against an older contract than the host then browses its default catalog instead of erroring, which
+/// mirrors how the host maps unknown enum names to a documented fallback.
+fn lenient_listing<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Listing>, D::Error> {
+    let raw = Option::<String>::deserialize(deserializer)?;
+    Ok(raw.and_then(|name| match name.as_str() {
+        "popular" => Some(Listing::Popular),
+        "latest" => Some(Listing::Latest),
+        _ => None,
+    }))
 }
 
 /// Input to `manga_details`. Mirrors `Wire.MangaDetailsRequest`.
@@ -193,6 +224,9 @@ pub struct HttpRequest {
     pub headers: std::collections::BTreeMap<String, String>,
     /// Base64 body, so binary survives the JSON hop. `None` for bodyless methods.
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Base64-encoded request body; `None` for bodyless methods. Still base64 (unlike the *response*
+    /// body, which is framed raw) because a request crosses as JSON and is small — no source sends
+    /// bulk bytes upward. Encode it yourself; the SDK carries no base64 dependency for this.
     pub body_base64: Option<String>,
 }
 
@@ -207,14 +241,18 @@ impl HttpRequest {
     }
 }
 
-/// The host's reply. Mirrors `Wire.HttpResponseWire`.
-#[derive(Deserialize, Default)]
-#[serde(rename_all = "camelCase", default)]
+/// The host's reply. Mirrors `Wire.HttpResponseWire`, decoded from the binary frame the
+/// `http_request` import returns (see `HttpFrame.kt` on the host).
+///
+/// The body is **not** a separate allocation: `frame` is the host's buffer, adopted whole, and
+/// [`HttpResponse::body`] hands back the slice of it after the header block. Nothing about the
+/// response body is copied, decoded, or parsed unless a source asks for it.
+#[derive(Default)]
 pub struct HttpResponse {
     pub status: i32,
     pub headers: std::collections::BTreeMap<String, String>,
-    /// Base64 body — use [`HttpResponse::body`] rather than decoding by hand.
-    pub body_base64: String,
+    pub(crate) frame: Vec<u8>,
+    pub(crate) body_offset: usize,
 }
 
 /// Severity for the `log` import; the `i32` passed is this enum's ordinal, matching `Wire.LogLevel`.
