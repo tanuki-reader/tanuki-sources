@@ -9,18 +9,13 @@
 //!
 //! ## API shape (`https://mangafire.to/api`)
 //! - `GET /api/titles?order[views_30d]=desc | order[chapter_updated_at]=desc | keyword=…&page&limit=50`
-//!   → `{ items: [{ hid, slug?, title, poster:{url} }], … }` (browse / latest / search).
-//! - `GET /api/titles/{hid}` → the full record (`synopsisHtml`, `authors[]`, `status`).
+//!   → `{ items: [{ hid, slug?, title, poster:{small,medium,large} }], meta:{ hasNext } }`.
+//! - `GET /api/titles/{hid}` → `{ data: { …full record… } }` (wrapped).
 //! - `GET /api/titles/{hid}/chapters?language=en&sort=number&order=desc&page&limit=200`
-//!   → `{ items: [{ id, number, name?, createdAt?, type? }] }` (paginated; walked here).
+//!   → `{ items: [{ id, number, name?, createdAt?, type? }], meta:{ hasNext } }` (walked here).
 //! - `GET /api/chapters/{id}` → `{ data: { pages: [{ url }] } }` (direct image URLs).
 //!
-//! ## ⚠️ Not yet operational — needs the reference VrfSigner + a few DTO confirmations
-//! [`vrf::CONFIGURED`] is `false`: the signing constants must be transcribed verbatim from the reference
-//! `VrfSigner.kt` before any API call works (until then browse fails with a clear `"config"` error, by
-//! design — a wrong token would silently 403). Fields marked `TODO(dto)` below are best-effort guesses to
-//! confirm against the real `Dto.kt` / a live response: the poster/author field names, the `createdAt`
-//! unit, the manga permalink scheme, and whether responses are wrapped.
+//! Volumes (`/api/titles/{hid}/volumes`) are intentionally not listed yet — chapters only, for now.
 
 mod vrf;
 
@@ -38,7 +33,7 @@ const USER_AGENT: &str = "Tanuki (+https://tanuki.app)";
 const LANG: &str = "en";
 /// Catalog page size (MangaFire's own default).
 const PAGE_SIZE: i32 = 50;
-/// Chapters per request; walked until exhausted since the ABI's `chapter_list` is unpaginated.
+/// Chapters per request; walked until `meta.hasNext` is false since the ABI's `chapter_list` is unpaginated.
 const CHAPTER_PAGE_SIZE: i32 = 200;
 /// Safety valve on the chapter walk so a bad page never loops forever.
 const MAX_CHAPTER_REQUESTS: usize = 50;
@@ -65,40 +60,37 @@ impl Source for MangaFire {
     /// the ordering (Popular → 30-day views, Latest → most recently updated).
     fn manga_list(request: MangaListRequest) -> Result<MangaPage, AbiError> {
         let page = request.page.max(1);
-        let mut query = format!("page={page}&limit={PAGE_SIZE}");
+        let mut params: Vec<(&str, String)> =
+            vec![("page", page.to_string()), ("limit", PAGE_SIZE.to_string())];
         match request.query.as_deref() {
             Some(keyword) if !keyword.trim().is_empty() => {
-                query.push_str("&keyword=");
-                query.push_str(&percent_encode(keyword.trim()));
+                params.push(("keyword", keyword.trim().to_string()));
             }
-            _ => {
-                let order = match request.listing {
-                    Some(Listing::Latest) => "order[chapter_updated_at]=desc",
-                    _ => "order[views_30d]=desc",
-                };
-                query.push('&');
-                query.push_str(order);
-            }
+            _ => match request.listing {
+                Some(Listing::Latest) => params.push(("order[chapter_updated_at]", "desc".to_string())),
+                _ => params.push(("order[views_30d]", "desc".to_string())),
+            },
         }
 
-        let response: ApiList<MangaDto> = signed_get("/api/titles", &query)?;
-        let entries: Vec<Manga> = response.items.iter().map(MangaDto::to_wire).collect();
-        // No reliable page-count field is confirmed yet, so infer: a full page implies more may follow.
-        let has_next_page = entries.len() as i32 >= PAGE_SIZE;
+        let response: ApiList<MangaDto> = signed_get("/api/titles", &params)?;
+        let has_next_page = response.meta.as_ref().map_or(false, |m| m.has_next);
+        let entries = response.items.iter().map(MangaDto::to_wire).collect();
         Ok(MangaPage { entries, has_next_page })
     }
 
-    /// The full record for one series — the description/author/status browse omits.
+    /// The full record for one series — the description/author/status browse omits. The response is
+    /// wrapped in a `data` object (unlike the list endpoints).
     fn manga_details(request: MangaDetailsRequest) -> Result<Manga, AbiError> {
         let hid = request.manga_key.trim();
         if hid.is_empty() {
             return Err(AbiError::with_code("A manga lookup needs a manga key.", "not_found"));
         }
-        let detail: MangaDetailsDto = signed_get(&format!("/api/titles/{hid}"), "")?;
-        Ok(detail.to_wire())
+        let response: DataResponse<MangaDetailsDto> = signed_get(&format!("/api/titles/{hid}"), &[])?;
+        Ok(response.data.to_wire())
     }
 
-    /// Every chapter of one series in [`LANG`], newest first. Walks the paginated feed until it empties.
+    /// Every chapter of one series in [`LANG`], newest first. Walks the paginated feed until `meta.hasNext`
+    /// clears (or the safety cap). Volumes are a separate endpoint and not listed here.
     fn chapter_list(request: ChapterListRequest) -> Result<Vec<Chapter>, AbiError> {
         let hid = request.manga_key.trim();
         if hid.is_empty() {
@@ -107,15 +99,18 @@ impl Source for MangaFire {
 
         let mut chapters = Vec::new();
         for page in 1..=MAX_CHAPTER_REQUESTS {
-            let query = format!(
-                "language={LANG}&sort=number&order=desc&page={page}&limit={CHAPTER_PAGE_SIZE}"
-            );
+            let params: Vec<(&str, String)> = vec![
+                ("language", LANG.to_string()),
+                ("sort", "number".to_string()),
+                ("order", "desc".to_string()),
+                ("page", page.to_string()),
+                ("limit", CHAPTER_PAGE_SIZE.to_string()),
+            ];
             let response: ApiList<ChapterDto> =
-                signed_get(&format!("/api/titles/{hid}/chapters"), &query)?;
+                signed_get(&format!("/api/titles/{hid}/chapters"), &params)?;
 
-            let fetched = response.items.len() as i32;
             chapters.extend(response.items.iter().map(ChapterDto::to_wire));
-            if fetched < CHAPTER_PAGE_SIZE {
+            if !response.meta.as_ref().map_or(false, |m| m.has_next) {
                 break;
             }
         }
@@ -130,7 +125,7 @@ impl Source for MangaFire {
         if chapter_id.is_empty() {
             return Err(AbiError::with_code("A page list needs a chapter key.", "not_found"));
         }
-        let response: PagesResponse = signed_get(&format!("/api/chapters/{chapter_id}"), "")?;
+        let response: DataResponse<ChapterDataDto> = signed_get(&format!("/api/chapters/{chapter_id}"), &[])?;
         let pages = response
             .data
             .pages
@@ -151,23 +146,67 @@ export_source!(MangaFire);
 
 /// GETs a VRF-signed MangaFire API endpoint and decodes its JSON.
 ///
-/// `query` is the canonical parameter string (without `vrf`); it is signed into the `vrf` token appended
-/// to the request. An empty `query` still signs (some endpoints take no params). Fails with a clear
-/// `"config"` error while [`vrf::CONFIGURED`] is false, so the source never sends an invalid token.
-fn signed_get<T: DeserializeOwned>(path: &str, query: &str) -> Result<T, AbiError> {
-    let vrf = vrf::sign(query).ok_or_else(|| {
-        AbiError::with_code(
-            "MangaFire request signing (vrf) is not configured — fill in the VrfSigner constants in \
-             native/sources/mangafire/src/vrf.rs before this source can reach the API.",
-            "config",
-        )
-    })?;
-    let url = if query.is_empty() {
-        format!("{BASE}{path}?vrf={vrf}")
-    } else {
-        format!("{BASE}{path}?{query}&vrf={vrf}")
-    };
+/// Signs the request's [`canonical_signing_input`] into the `vrf` token, appends it, fetches with the
+/// site headers, and decodes. `params` are (key, **decoded** value) pairs; they are re-emitted
+/// percent-encoded on the wire while the signature is computed over their decoded, sorted, `[]`-indexed
+/// canonical form (see [`vrf`]).
+fn signed_get<T: DeserializeOwned>(path: &str, params: &[(&str, String)]) -> Result<T, AbiError> {
+    let vrf = vrf::sign(&canonical_signing_input(path, params))
+        .ok_or_else(|| AbiError::with_code("Could not sign the MangaFire request (vrf).", "config"))?;
+
+    // Wire URL: params in the same key-sorted order (original keys, encoded values), then vrf.
+    let mut sorted: Vec<&(&str, String)> = params.iter().collect();
+    sorted.sort_by(|a, b| a.0.cmp(b.0));
+    let mut url = format!("{BASE}{path}?");
+    for (key, value) in sorted {
+        url.push_str(key);
+        url.push('=');
+        url.push_str(&percent_encode(value));
+        url.push('&');
+    }
+    url.push_str("vrf=");
+    url.push_str(&vrf);
+
     get_json(&url)
+}
+
+/// Builds the exact string MangaFire signs: the `/api`-stripped path, then — if any — the parameters
+/// **sorted by key** and `&`-joined, with a `key[]` rewritten to `key[0]`, `key[1]`, … per repeat, using
+/// the **decoded** values. Mirrors `VrfSigner.sortedQueryUrl` in the reference extension.
+fn canonical_signing_input(path: &str, params: &[(&str, String)]) -> String {
+    let stripped = path.strip_prefix("/api").unwrap_or(path);
+    let mut out = String::from(stripped);
+    if params.is_empty() {
+        return out;
+    }
+
+    let mut sorted: Vec<&(&str, String)> = params.iter().collect();
+    sorted.sort_by(|a, b| a.0.cmp(b.0));
+
+    out.push('?');
+    let mut last_key = "";
+    let mut index = 0usize;
+    for (i, (key, value)) in sorted.iter().enumerate() {
+        if i > 0 {
+            out.push('&');
+        }
+        if let Some(base) = key.strip_suffix("[]") {
+            if last_key != *key {
+                index = 0;
+            }
+            last_key = key;
+            out.push_str(base);
+            out.push('[');
+            out.push_str(&index.to_string());
+            out.push(']');
+            index += 1;
+        } else {
+            out.push_str(key);
+        }
+        out.push('=');
+        out.push_str(value);
+    }
+    out
 }
 
 /// Fetches [url] with the site headers and decodes JSON, turning non-2xx into an `"http"` error and
@@ -188,24 +227,38 @@ fn get_json<T: DeserializeOwned>(url: &str) -> Result<T, AbiError> {
         .map_err(|e| AbiError::with_code(format!("Could not parse MangaFire response: {e}"), "parse"))
 }
 
-/// The manga's permalink on the site. TODO(dto): confirm MangaFire's URL scheme — assumed
-/// `/manga/{slug}.{hid}`, falling back to `/manga/{hid}` when the listing carries no slug.
+/// The absolute permalink to a series on the site: `/title/{hid}-{slug}` (or `/title/{hid}` with no slug),
+/// matching the reference extension's `SManga.url`.
 fn manga_url(hid: &str, slug: Option<&str>) -> String {
     match slug {
-        Some(slug) if !slug.is_empty() => format!("{BASE}/manga/{slug}.{hid}"),
-        _ => format!("{BASE}/manga/{hid}"),
+        Some(slug) if !slug.is_empty() => format!("{BASE}/title/{hid}-{slug}"),
+        _ => format!("{BASE}/title/{hid}"),
     }
 }
 
-// --- JSON DTOs (guest-side mirror of the API; confirm TODO(dto) fields against the real Dto.kt) --------
+// --- JSON DTOs (guest-side mirror of the API, from the reference Dto.kt) ------------------------------
 
-/// A list response: `{ items: [...] }`. TODO(dto): confirm there's no outer `{ status, result }` wrapper
-/// and whether pagination metadata (a `meta` object) should drive `has_next_page` instead of the count.
-#[derive(Deserialize, Default)]
+/// A list response: `{ items, meta }`. Titles and chapters share this shape.
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ApiList<T> {
     #[serde(default = "Vec::new")]
     items: Vec<T>,
+    #[serde(default)]
+    meta: Option<ApiMeta>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiMeta {
+    #[serde(default)]
+    has_next: bool,
+}
+
+/// A single-entity response wrapped in `data` — details and pages use this (the list endpoints don't).
+#[derive(Deserialize)]
+struct DataResponse<T> {
+    data: T,
 }
 
 #[derive(Deserialize)]
@@ -216,7 +269,7 @@ struct MangaDto {
     slug: Option<String>,
     title: String,
     #[serde(default)]
-    poster: Option<Poster>,
+    poster: Option<PosterDto>,
 }
 
 impl MangaDto {
@@ -225,7 +278,7 @@ impl MangaDto {
             key: self.hid.clone(),
             url: Some(manga_url(&self.hid, self.slug.as_deref())),
             title: self.title.clone(),
-            cover_url: self.poster.as_ref().and_then(|p| p.url.clone()),
+            cover_url: self.poster.as_ref().and_then(PosterDto::best),
             ..Default::default()
         }
     }
@@ -239,45 +292,54 @@ struct MangaDetailsDto {
     slug: Option<String>,
     title: String,
     #[serde(default)]
-    poster: Option<Poster>,
+    status: Option<String>,
+    #[serde(default)]
+    poster: Option<PosterDto>,
     #[serde(default)]
     synopsis_html: Option<String>,
     #[serde(default)]
-    authors: Vec<Entity>,
-    #[serde(default)]
-    status: Option<String>,
+    authors: Option<Vec<EntityDto>>,
 }
 
 impl MangaDetailsDto {
     fn to_wire(&self) -> Manga {
+        let author = self.authors.as_ref().and_then(|list| {
+            let joined = list.iter().map(|e| e.title.as_str()).collect::<Vec<_>>().join(", ");
+            (!joined.is_empty()).then_some(joined)
+        });
         Manga {
             key: self.hid.clone(),
             url: Some(manga_url(&self.hid, self.slug.as_deref())),
             title: self.title.clone(),
-            cover_url: self.poster.as_ref().and_then(|p| p.url.clone()),
-            author: self.authors.iter().find_map(|a| a.name.clone()),
-            // TODO(dto): synopsisHtml is HTML; strip tags to plain text once the exact markup is known.
-            description: self.synopsis_html.clone(),
-            // Passed through; the host maps an unrecognized name to UNKNOWN. TODO(dto): map MangaFire's
-            // status vocabulary (e.g. "releasing"/"completed"/"on_hiatus") to the ABI's PublishStatus names.
-            status: self.status.clone(),
+            cover_url: self.poster.as_ref().and_then(PosterDto::best),
+            author,
+            description: self.synopsis_html.as_deref().map(strip_html),
+            status: self.status.as_deref().and_then(map_status),
             ..Default::default()
         }
     }
 }
 
-/// TODO(dto): confirm the poster/cover field name (assumed `url`).
+/// Cover variants, largest first. Mirrors the reference's `poster.large ?: medium ?: small`.
 #[derive(Deserialize)]
-struct Poster {
+struct PosterDto {
     #[serde(default)]
-    url: Option<String>,
+    small: Option<String>,
+    #[serde(default)]
+    medium: Option<String>,
+    #[serde(default)]
+    large: Option<String>,
 }
 
-/// TODO(dto): confirm the author entity's display field (assumed `name`).
+impl PosterDto {
+    fn best(&self) -> Option<String> {
+        self.large.clone().or_else(|| self.medium.clone()).or_else(|| self.small.clone())
+    }
+}
+
 #[derive(Deserialize)]
-struct Entity {
-    #[serde(default)]
-    name: Option<String>,
+struct EntityDto {
+    title: String,
 }
 
 #[derive(Deserialize)]
@@ -290,28 +352,27 @@ struct ChapterDto {
     name: Option<String>,
     #[serde(default)]
     created_at: Option<i64>,
+    #[serde(rename = "type", default)]
+    kind: Option<String>,
 }
 
 impl ChapterDto {
     fn to_wire(&self) -> Chapter {
         Chapter {
+            // chapter_pages addresses the chapter by its numeric id (GET /api/chapters/{id}).
             key: self.id.to_string(),
             name: self.name.clone(),
             number: self.number,
-            // TODO(dto): confirm createdAt's unit. Assumed epoch **seconds** → the ABI wants milliseconds.
+            // createdAt is epoch **seconds**; the ABI wants milliseconds.
             date_upload: self.created_at.map(|seconds| seconds * 1_000),
-            ..Default::default()
+            // MangaFire has no scanlation groups; its `type` (e.g. the release track) stands in.
+            scanlator: self.kind.clone(),
         }
     }
 }
 
 #[derive(Deserialize)]
-struct PagesResponse {
-    data: ChapterData,
-}
-
-#[derive(Deserialize)]
-struct ChapterData {
+struct ChapterDataDto {
     #[serde(default = "Vec::new")]
     pages: Vec<PageDto>,
 }
@@ -319,6 +380,43 @@ struct ChapterData {
 #[derive(Deserialize)]
 struct PageDto {
     url: String,
+}
+
+/// Maps MangaFire's status vocabulary to an ABI `PublishStatus` name (host matches case-insensitively);
+/// an unrecognized value returns `None`, which the host reads as `UNKNOWN`.
+fn map_status(status: &str) -> Option<String> {
+    let name = match status.to_ascii_lowercase().as_str() {
+        "releasing" => "ongoing",
+        "finished" => "completed",
+        "on_hiatus" => "hiatus",
+        "discontinued" => "cancelled",
+        _ => return None,
+    };
+    Some(name.to_string())
+}
+
+/// Crude HTML → plain text for the synopsis: drop tags and decode the handful of entities MangaFire uses.
+/// A guest can't pull an HTML parser cheaply into wasm, and a synopsis only needs readable text, not
+/// structure — so this strips `<…>` runs and collapses whitespace rather than parsing a DOM.
+fn strip_html(html: &str) -> String {
+    let mut text = String::with_capacity(html.len());
+    let mut in_tag = false;
+    for ch in html.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => text.push(ch),
+            _ => {}
+        }
+    }
+    let text = text
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&nbsp;", " ");
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Percent-encodes a query value (RFC 3986 unreserved passes through, everything else `%XX`). Hand-rolled
