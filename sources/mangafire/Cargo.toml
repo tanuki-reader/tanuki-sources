@@ -1,0 +1,21 @@
+[package]
+name = "tanuki-source-mangafire"
+version = "0.1.0"
+edition = "2021"
+description = "MangaFire source for Tanuki — the first Cloudflare-fronted source, with VRF-signed API requests."
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+tanuki-source-api = { path = "../../source-api" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# VRF token: the signed value is emitted URL-safe base64 (no padding); see vrf.rs.
+base64 = { version = "0.22", default-features = false, features = ["alloc"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
