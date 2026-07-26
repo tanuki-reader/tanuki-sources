@@ -7,7 +7,8 @@
 //! interceptor solves it below this code, invisibly.
 //!
 //! Implemented so far: [`Source::meta`], [`Source::manga_list`] (browse + search),
-//! [`Source::manga_details`] and [`Source::chapter_list`]. Pages come next.
+//! [`Source::manga_details`], [`Source::chapter_list`] and [`Source::chapter_pages`] (page images
+//! via the at-home server).
 //!
 //! Browse and details deliberately parse **different** subsets of the same `/manga` shape — see
 //! [`ListAttributes`]. A browse page is twenty entries parsed in a WASM interpreter, so every field it
@@ -28,6 +29,10 @@
 //! `includes[]=scanlation_group` inlines the translating group. The feed is paginated and caps `limit`
 //! at 500, so a long series takes several round-trips — the ABI's `chapter_list` is unpaginated, so
 //! this source walks the feed itself.
+//!
+//! `GET /at-home/server/{chapter-id}` returns `baseUrl` (a short-lived CDN node) and a `chapter` object
+//! with a `hash` and the ordered page file names in `data[]` (full quality) / `dataSaver[]`
+//! (compressed). A full-quality page URL is `{baseUrl}/data/{hash}/{fileName}`.
 
 use std::collections::BTreeMap;
 use std::ops::Range;
@@ -64,8 +69,9 @@ impl Source for MangaDex {
             lang: "en".to_string(),
             base_url: Some("https://mangadex.org".to_string()),
             // v2 adds chapter_list and the icon; v3 moves to the contract's listing vocabulary;
-            // v4 adds manga_details and trims browse to the fields the grid actually renders.
-            version: Some(4),
+            // v4 adds manga_details and trims browse to the fields the grid actually renders;
+            // v5 adds chapter_pages (page images via the at-home server).
+            version: Some(5),
             icon_url: Some(ICON_URL.to_string()),
             nsfw: false,
             // Both of the contract's listings map onto a MangaDex sort order — see build_list_url.
@@ -127,6 +133,39 @@ impl Source for MangaDex {
             }
         }
         Ok(chapters)
+    }
+
+    /// The ordered page images of one chapter, via MangaDex's at-home server.
+    ///
+    /// One request: `/at-home/server/{id}` hands back a short-lived CDN `baseUrl` and the chapter's
+    /// file names, and a full-quality page URL is `{baseUrl}/data/{hash}/{fileName}`. Those URLs are
+    /// returned directly in [`Page::image_url`], so the app's image loader fetches them with no second
+    /// per-page resolve. Data-saver (`/data-saver/{hash}/…`) is left for a future quality setting.
+    ///
+    /// The `baseUrl` is deliberately not cached: MangaDex rotates at-home nodes and the assignment is
+    /// short-lived, so it's fetched fresh each time a chapter is opened.
+    fn chapter_pages(request: ChapterPagesRequest) -> Result<Vec<Page>, AbiError> {
+        let chapter_key = request.chapter_key.trim();
+        if chapter_key.is_empty() {
+            return Err(AbiError::with_code("A page list needs a chapter key.", "not_found"));
+        }
+
+        let server: AtHomeServer = get_json(&build_at_home_url(chapter_key))?;
+        let base = server.base_url.trim_end_matches('/');
+        let hash = server.chapter.hash.trim();
+
+        let pages = server
+            .chapter
+            .data
+            .iter()
+            .enumerate()
+            .map(|(index, file)| Page {
+                index: index as i32,
+                image_url: Some(format!("{base}/data/{hash}/{file}")),
+                url: None,
+            })
+            .collect();
+        Ok(pages)
     }
 }
 
@@ -204,6 +243,12 @@ fn build_feed_url(manga_key: &str, offset: i32) -> String {
          &order[volume]=asc&order[chapter]=asc",
         percent_encode(manga_key),
     )
+}
+
+/// Builds the `/at-home/server/{id}` request URL for a chapter's page list. The `baseUrl` it returns
+/// is short-lived, so callers fetch it per chapter open rather than caching it.
+fn build_at_home_url(chapter_key: &str) -> String {
+    format!("{API_BASE}/at-home/server/{}", percent_encode(chapter_key))
 }
 
 /// Maps one feed entry to a wire [`Chapter`]. Lenient like [`map_manga`]: a chapter MangaDex didn't
@@ -486,6 +531,26 @@ struct DetailAttributes {
     status: Option<String>,
     #[serde(default)]
     original_language: String,
+}
+
+/// The `/at-home/server/{id}` response: a CDN base URL plus the chapter's page file names. A page URL
+/// is `{base_url}/data/{chapter.hash}/{file}`.
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct AtHomeServer {
+    #[serde(default)]
+    base_url: String,
+    #[serde(default)]
+    chapter: AtHomeChapter,
+}
+
+#[derive(Deserialize, Default)]
+struct AtHomeChapter {
+    #[serde(default)]
+    hash: String,
+    /// Full-quality page file names, in reading order. `dataSaver` (compressed) is intentionally unread.
+    #[serde(default)]
+    data: Vec<String>,
 }
 
 #[derive(Deserialize)]
