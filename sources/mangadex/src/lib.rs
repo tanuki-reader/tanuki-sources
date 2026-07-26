@@ -163,6 +163,8 @@ impl Source for MangaDex {
                 index: index as i32,
                 image_url: Some(format!("{base}/data/{hash}/{file}")),
                 url: None,
+                // MangaDex's at-home CDN needs no Referer/UA on the image fetch; leave headers empty.
+                ..Default::default()
             })
             .collect();
         Ok(pages)

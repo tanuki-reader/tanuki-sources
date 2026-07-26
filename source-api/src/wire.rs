@@ -157,6 +157,11 @@ pub struct Page {
     pub image_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// Per-request headers the app must send when fetching this page's image — e.g. a `Referer` for a
+    /// hotlink-guarded host (MangaFire). The app applies these to the image fetch, which runs on the same
+    /// Cloudflare-carrying client as source calls. Empty = none; additive within the ABI version.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub headers: std::collections::BTreeMap<String, String>,
 }
 
 // --- Requests (host → guest) ---------------------------------------------------------------------
