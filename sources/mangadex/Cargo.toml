@@ -8,6 +8,15 @@ publish = false
 [lib]
 crate-type = ["cdylib"]
 
+# MangaDex serves every language from one API, but the ABI gives a source a single `lang`, so this
+# crate compiles once per language — see `LANG` in src/lib.rs and `devSourceBundles` in
+# shared/build.gradle.kts. Exactly one must be enabled; the build always passes
+# --no-default-features, and `default` exists only so a bare `cargo build` (and rust-analyzer) works.
+[features]
+default = ["lang-en"]
+lang-en = []
+lang-pt-br = []
+
 [dependencies]
 tanuki-source-api = { path = "../../source-api" }
 serde = { version = "1", features = ["derive"] }

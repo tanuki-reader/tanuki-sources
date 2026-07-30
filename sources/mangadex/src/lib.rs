@@ -35,7 +35,6 @@
 //! (compressed). A full-quality page URL is `{baseUrl}/data/{hash}/{fileName}`.
 
 use std::collections::BTreeMap;
-use std::ops::Range;
 
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -50,28 +49,59 @@ const FEED_PAGE_SIZE: i32 = 500;
 /// Safety valve on the feed walk, so a bad `total` can't spin forever: 20 × 500 = 10 000 chapters,
 /// which is also MangaDex's own `offset` ceiling. No series comes close.
 const MAX_FEED_REQUESTS: usize = 20;
-/// Translation language served by this source, matching the `lang` in [`Source::meta`].
-const LANG: &str = "en";
+/// MangaDex's tag for this build's language, used both to filter the chapter feed
+/// (`translatedLanguage[]`) and as the key into MangaDex's language-keyed title/description maps.
+const LANG: &str = language::API_TAG;
 /// The source's badge in the app's source list. MangaDex's PWA icon, because it is the only mascot
 /// artwork the site serves as a **raster** image — the brand logo is an SVG and the favicon an `.ico`,
 /// neither of which the app's image loader decodes. 180×180 is comfortably above the 34dp it's drawn at.
 const ICON_URL: &str = "https://mangadex.org/pwa/icons/icon-180.png";
-/// A descriptive UA is polite and helps if MangaDex ever rate-limits by client.
-const USER_AGENT: &str = "Tanuki (+https://tanuki.app)";
+
+/// Everything that differs between this crate's language builds, in one place.
+///
+/// MangaDex serves every language from the same API, but the ABI gives a source exactly one `lang`, so
+/// the crate is compiled once per language behind a cargo feature (see `Cargo.toml` and
+/// `devSourceBundles` in `shared/build.gradle.kts`). The English build keeps the plain `mangadex` id it
+/// has always had, so existing libraries aren't silently re-pointed at another language.
+///
+/// Note the two spellings of the language: MangaDex tags it `pt-br`, the ABI wants BCP-47 `pt-BR`.
+#[cfg(feature = "lang-en")]
+mod language {
+    pub const API_TAG: &str = "en";
+    pub const ABI_TAG: &str = "en";
+    pub const SOURCE_ID: &str = "mangadex";
+    pub const SOURCE_NAME: &str = "MangaDex (EN)";
+}
+
+#[cfg(feature = "lang-pt-br")]
+mod language {
+    pub const API_TAG: &str = "pt-br";
+    pub const ABI_TAG: &str = "pt-BR";
+    pub const SOURCE_ID: &str = "mangadex-pt-br";
+    pub const SOURCE_NAME: &str = "MangaDex (pt-BR)";
+}
+
+// A missing or doubled language feature would otherwise fail as a confusing "unresolved module" or
+// "duplicate definition"; say what actually went wrong.
+#[cfg(not(any(feature = "lang-en", feature = "lang-pt-br")))]
+compile_error!("Build this source with exactly one language feature: lang-en or lang-pt-br.");
+#[cfg(all(feature = "lang-en", feature = "lang-pt-br"))]
+compile_error!("Build this source with exactly one language feature, not both.");
 
 struct MangaDex;
 
 impl Source for MangaDex {
     fn meta() -> SourceMeta {
         SourceMeta {
-            id: "mangadex".to_string(),
-            name: "MangaDex".to_string(),
-            lang: "en".to_string(),
+            id: language::SOURCE_ID.to_string(),
+            name: language::SOURCE_NAME.to_string(),
+            lang: language::ABI_TAG.to_string(),
             base_url: Some("https://mangadex.org".to_string()),
             // v2 adds chapter_list and the icon; v3 moves to the contract's listing vocabulary;
             // v4 adds manga_details and trims browse to the fields the grid actually renders;
-            // v5 adds chapter_pages (page images via the at-home server).
-            version: Some(5),
+            // v5 adds chapter_pages (page images via the at-home server);
+            // v6 makes the language a build-time choice, adding the pt-BR bundle.
+            version: Some(6),
             icon_url: Some(ICON_URL.to_string()),
             nsfw: false,
             // Both of the contract's listings map onto a MangaDex sort order — see build_list_url.
@@ -177,7 +207,7 @@ export_source!(MangaDex);
 /// unparseable JSON into a `"parse"` one. The Cloudflare `cf_clearance` cookie (when it exists) is
 /// added by the host, not here.
 fn get_json<T: DeserializeOwned>(url: &str) -> Result<T, AbiError> {
-    let response = fetch(&HttpRequest::get(url).header("User-Agent", USER_AGENT))?;
+    let response = fetch(&HttpRequest::get(url))?;
     if !(200..300).contains(&response.status) {
         return Err(AbiError::with_code(
             format!("MangaDex returned HTTP {}", response.status),
@@ -288,53 +318,9 @@ fn map_chapter(api: &ApiChapter) -> Chapter {
             .publish_at
             .as_deref()
             .or(attrs.readable_at.as_deref())
-            .and_then(parse_rfc3339_millis),
+            .and_then(parse_datetime_millis),
         scanlator: Some(scanlators.join(", ")).filter(|joined| !joined.is_empty()),
     }
-}
-
-/// Parses an RFC 3339 timestamp (`2018-01-01T12:30:00+00:00`, and the `Z` / fractional-second forms)
-/// into Unix epoch **milliseconds**, or `None` if it doesn't look like one.
-///
-/// Hand-rolled because a guest has no clock and no date crate worth ~100 KB of `.wasm`: MangaDex emits
-/// exactly one format, and the ABI wants epoch millis. Second precision is enough — a fractional part
-/// is skipped, not rounded.
-fn parse_rfc3339_millis(value: &str) -> Option<i64> {
-    let field = |range: Range<usize>| -> Option<i64> { value.get(range)?.parse::<i64>().ok() };
-
-    let (year, month, day) = (field(0..4)?, field(5..7)?, field(8..10)?);
-    let (hour, minute, second) = (field(11..13)?, field(14..16)?, field(17..19)?);
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
-        return None;
-    }
-
-    // Whatever follows the seconds is the zone, possibly behind a fractional part we don't need.
-    let zone = value[19..].trim_start_matches(|c: char| c == '.' || c.is_ascii_digit());
-    let zone_offset_seconds = match zone.as_bytes().first() {
-        None | Some(b'Z' | b'z') => 0,
-        Some(sign @ (b'+' | b'-')) => {
-            let hours: i64 = zone.get(1..3)?.parse().ok()?;
-            let minutes: i64 = zone.get(4..6)?.parse().ok()?;
-            let magnitude = hours * 3600 + minutes * 60;
-            if *sign == b'-' { -magnitude } else { magnitude }
-        }
-        Some(_) => return None,
-    };
-
-    let seconds = days_from_civil(year, month, day) * 86_400 + hour * 3600 + minute * 60 + second;
-    Some((seconds - zone_offset_seconds) * 1000)
-}
-
-/// Days from the Unix epoch to a proleptic-Gregorian date, by Howard Hinnant's `days_from_civil`.
-/// Branch-free and exact for every year we'll ever see; the shifted-year trick puts the leap day last
-/// so February's length never needs a special case.
-fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
-    let year = year - i64::from(month <= 2);
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let year_of_era = year - era * 400;
-    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    era * 146_097 + day_of_era - 719_468
 }
 
 /// Maps one **browse** entry to a wire [`Manga`]. Everything is best-effort: a missing title becomes a
@@ -351,6 +337,8 @@ fn map_list_manga(api: &ApiManga<ListAttributes>) -> Manga {
         title: pick_title(&api.attributes.title, &api.attributes.alt_titles),
         original_title: None,
         cover_url: api.cover_url(),
+        // MangaDex's cover CDN serves images with no Referer or UA requirement.
+        cover_headers: BTreeMap::new(),
         author: api.author(),
         description: None,
         status: api.attributes.status.clone(),
@@ -368,6 +356,7 @@ fn map_detail_manga(api: &ApiManga<DetailAttributes>) -> Manga {
         title: title.clone(),
         original_title: original_title(&title, &attrs.title, &attrs.alt_titles, &attrs.original_language),
         cover_url: api.cover_url(),
+        cover_headers: BTreeMap::new(),
         author: api.author(),
         description: pick_localized(&attrs.description),
         status: attrs.status.clone(),
@@ -424,19 +413,6 @@ fn original_title(
         .cloned()
         .or_else(|| alt_titles.iter().find_map(|alt| alt.get(original_language).cloned()))
         .filter(|candidate| !candidate.is_empty() && candidate != display)
-}
-
-/// Percent-encodes a query value (RFC 3986 unreserved set passes through; everything else is `%XX`).
-/// Small enough to avoid a dependency, and the only user-controlled text that reaches the URL.
-fn percent_encode(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(byte as char),
-            other => out.push_str(&format!("%{other:02X}")),
-        }
-    }
-    out
 }
 
 // --- API response subset (only the fields we read) ----------------------------------------------

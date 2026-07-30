@@ -41,9 +41,11 @@
 //! `SourceAbiException` carrying your message.
 
 mod abi;
+mod util;
 mod wire;
 
 pub use abi::ABI_VERSION;
+pub use util::*;
 pub use wire::*;
 
 /// Performs an HTTP request through the host and returns its response.

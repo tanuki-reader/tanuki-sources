@@ -28,9 +28,8 @@ use tanuki_source_api::*;
 const BASE: &str = "https://mangafire.to";
 /// Sent on every request; MangaFire's image hosts (and some API paths) reject a missing/foreign Referer.
 const REFERER: &str = "https://mangafire.to/";
-const USER_AGENT: &str = "Tanuki (+https://tanuki.app)";
-/// Translation language this source serves, matching [`Source::meta`]'s `lang`.
-const LANG: &str = "en";
+/// MangaFire's tag for this build's language, sent as the chapter feed's `language` parameter.
+const LANG: &str = language::API_TAG;
 /// Catalog page size (MangaFire's own default).
 const PAGE_SIZE: i32 = 50;
 /// Chapters per request; walked until `meta.hasNext` is false since the ABI's `chapter_list` is unpaginated.
@@ -38,16 +37,41 @@ const CHAPTER_PAGE_SIZE: i32 = 200;
 /// Safety valve on the chapter walk so a bad page never loops forever.
 const MAX_CHAPTER_REQUESTS: usize = 50;
 
+/// Everything that differs between this crate's language builds — MangaFire translates into several
+/// languages behind one API, and the ABI gives a source exactly one `lang`, so the crate is compiled
+/// once per language behind a cargo feature. Mirrors the MangaDex crate; see the longer note there.
+#[cfg(feature = "lang-en")]
+mod language {
+    pub const API_TAG: &str = "en";
+    pub const ABI_TAG: &str = "en";
+    pub const SOURCE_ID: &str = "mangafire";
+    pub const SOURCE_NAME: &str = "MangaFire (EN)";
+}
+
+#[cfg(feature = "lang-pt-br")]
+mod language {
+    pub const API_TAG: &str = "pt-br";
+    pub const ABI_TAG: &str = "pt-BR";
+    pub const SOURCE_ID: &str = "mangafire-pt-br";
+    pub const SOURCE_NAME: &str = "MangaFire (pt-BR)";
+}
+
+#[cfg(not(any(feature = "lang-en", feature = "lang-pt-br")))]
+compile_error!("Build this source with exactly one language feature: lang-en or lang-pt-br.");
+#[cfg(all(feature = "lang-en", feature = "lang-pt-br"))]
+compile_error!("Build this source with exactly one language feature, not both.");
+
 struct MangaFire;
 
 impl Source for MangaFire {
     fn meta() -> SourceMeta {
         SourceMeta {
-            id: "mangafire".to_string(),
-            name: "MangaFire".to_string(),
-            lang: LANG.to_string(),
+            id: language::SOURCE_ID.to_string(),
+            name: language::SOURCE_NAME.to_string(),
+            lang: language::ABI_TAG.to_string(),
             base_url: Some(BASE.to_string()),
-            version: Some(1),
+            // v2 makes the language a build-time choice, adding the pt-BR bundle.
+            version: Some(2),
             // TODO(icon): point at a raster (PNG/WebP) MangaFire icon; the favicon is an .ico the loader
             // can't decode, so None (lettered avatar) is correct until a raster URL is confirmed.
             icon_url: None,
@@ -210,12 +234,12 @@ fn canonical_signing_input(path: &str, params: &[(&str, String)]) -> String {
 }
 
 /// Fetches [url] with the site headers and decodes JSON, turning non-2xx into an `"http"` error and
-/// unparseable bodies into a `"parse"` one. Cloudflare's `cf_clearance` is added by the host, not here.
+/// unparseable bodies into a `"parse"` one. The `User-Agent` and Cloudflare's `cf_clearance` are both
+/// applied by the host, not here — the app owns one browser-shaped UA for all sources, and a source
+/// setting its own is what got MangaFire permanently challenged.
 fn get_json<T: DeserializeOwned>(url: &str) -> Result<T, AbiError> {
     let response = fetch(
-        &HttpRequest::get(url)
-            .header("User-Agent", USER_AGENT)
-            .header("Referer", REFERER),
+        &HttpRequest::get(url).header("Referer", REFERER),
     )?;
     if !(200..300).contains(&response.status) {
         return Err(AbiError::with_code(
@@ -395,39 +419,3 @@ fn map_status(status: &str) -> Option<String> {
     Some(name.to_string())
 }
 
-/// Crude HTML → plain text for the synopsis: drop tags and decode the handful of entities MangaFire uses.
-/// A guest can't pull an HTML parser cheaply into wasm, and a synopsis only needs readable text, not
-/// structure — so this strips `<…>` runs and collapses whitespace rather than parsing a DOM.
-fn strip_html(html: &str) -> String {
-    let mut text = String::with_capacity(html.len());
-    let mut in_tag = false;
-    for ch in html.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _ if !in_tag => text.push(ch),
-            _ => {}
-        }
-    }
-    let text = text
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&nbsp;", " ");
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-/// Percent-encodes a query value (RFC 3986 unreserved passes through, everything else `%XX`). Hand-rolled
-/// like the MangaDex source, to avoid a dependency for the one bit of user-controlled text in a URL.
-fn percent_encode(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(byte as char),
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
-}

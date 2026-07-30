@@ -8,6 +8,12 @@ publish = false
 [lib]
 crate-type = ["cdylib"]
 
+# One crate, one bundle per translation language — see the same block in the MangaDex crate.
+[features]
+default = ["lang-en"]
+lang-en = []
+lang-pt-br = []
+
 [dependencies]
 tanuki-source-api = { path = "../../source-api" }
 serde = { version = "1", features = ["derive"] }

@@ -1,0 +1,19 @@
+[package]
+name = "tanuki-source-hipercool"
+version = "0.1.0"
+edition = "2021"
+description = "Hipercool source for Tanuki — pt-BR, a tRPC API behind a session cookie the guest mints itself."
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+tanuki-source-api = { path = "../../source-api" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true

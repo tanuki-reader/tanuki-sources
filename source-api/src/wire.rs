@@ -111,6 +111,12 @@ pub struct Manga {
     pub original_title: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cover_url: Option<String>,
+    /// Per-request headers the app must send when fetching [`Manga::cover_url`] — the cover's
+    /// counterpart to [`Page::headers`], for a source whose image CDN checks the `Referer` (Hipercool
+    /// 403s without it). The app persists these with the manga, so a library cover still loads when
+    /// nothing of this source is otherwise in play. Empty = none; additive within the ABI version.
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub cover_headers: std::collections::BTreeMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
