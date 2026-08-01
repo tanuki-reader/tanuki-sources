@@ -70,7 +70,7 @@ mod language {
     pub const API_TAG: &str = "en";
     pub const ABI_TAG: &str = "en";
     pub const SOURCE_ID: &str = "mangadex";
-    pub const SOURCE_NAME: &str = "MangaDex (EN)";
+    pub const SOURCE_NAME: &str = "MangaDex";
 }
 
 #[cfg(feature = "lang-pt-br")]
@@ -78,7 +78,7 @@ mod language {
     pub const API_TAG: &str = "pt-br";
     pub const ABI_TAG: &str = "pt-BR";
     pub const SOURCE_ID: &str = "mangadex-pt-br";
-    pub const SOURCE_NAME: &str = "MangaDex (pt-BR)";
+    pub const SOURCE_NAME: &str = "MangaDex";
 }
 
 // A missing or doubled language feature would otherwise fail as a confusing "unresolved module" or
