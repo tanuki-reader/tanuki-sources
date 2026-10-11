@@ -141,6 +141,13 @@ pub struct Manga {
     /// Genre/tag names as the source shows them. Optional (empty = none); the app shows a few.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub genres: Vec<String>,
+    /// The series' AniList id, when the source links to it. Optional: lets the app match the series
+    /// exactly for its metadata instead of guessing by title. Usually only on `manga_details`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anilist_id: Option<i64>,
+    /// The series' MyAnimeList id, when the source links to it. Same purpose as [`Manga::anilist_id`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mal_id: Option<i64>,
 }
 
 /// One section of a source's home, returned by the optional `source_home` export. Mirrors

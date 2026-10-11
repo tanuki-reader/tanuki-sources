@@ -101,7 +101,7 @@ impl Source for MangaDex {
             // v4 adds manga_details and trims browse to the fields the grid actually renders;
             // v5 adds chapter_pages (page images via the at-home server);
             // v6 makes the language a build-time choice, adding the pt-BR bundle.
-            version: Some(8),
+            version: Some(9),
             icon_url: Some(ICON_URL.to_string()),
             nsfw: false,
             // Both of the contract's listings map onto a MangaDex sort order — see build_list_url.
@@ -380,6 +380,9 @@ fn map_detail_manga(api: &ApiManga<DetailAttributes>) -> Manga {
         author: api.author(),
         description: pick_localized(&attrs.description),
         status: attrs.status.clone(),
+        // `links` carries the series' ids on other sites; `al`/`mal` let the app match its metadata exactly.
+        anilist_id: attrs.links.get("al").and_then(|id| id.trim().parse().ok()),
+        mal_id: attrs.links.get("mal").and_then(|id| id.trim().parse().ok()),
         ..Default::default()
     }
 }
@@ -547,6 +550,14 @@ struct DetailAttributes {
     status: Option<String>,
     #[serde(default)]
     original_language: String,
+    /// The series' ids on other sites (`al`, `mal`, `mu`, …); null on some records.
+    #[serde(default, deserialize_with = "null_as_empty")]
+    links: BTreeMap<String, String>,
+}
+
+/// MangaDex sends `null` rather than `{}` for an empty object; read it as empty.
+fn null_as_empty<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<BTreeMap<String, String>, D::Error> {
+    Ok(Option::<BTreeMap<String, String>>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 /// The `/at-home/server/{id}` response: a CDN base URL plus the chapter's page file names. A page URL

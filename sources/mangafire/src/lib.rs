@@ -71,7 +71,7 @@ impl Source for MangaFire {
             lang: language::ABI_TAG.to_string(),
             base_url: Some(BASE.to_string()),
             // v2 makes the language a build-time choice, adding the pt-BR bundle.
-            version: Some(4),
+            version: Some(5),
             // TODO(icon): point at a raster (PNG/WebP) MangaFire icon; the favicon is an .ico the loader
             // can't decode, so None (lettered avatar) is correct until a raster URL is confirmed.
             icon_url: None,
@@ -339,6 +339,20 @@ struct MangaDetailsDto {
     synopsis_html: Option<String>,
     #[serde(default)]
     authors: Option<Vec<EntityDto>>,
+    /// Ids on AniList / MyAnimeList. The API sends them as strings ("39281"); read either form.
+    #[serde(default)]
+    anilist_id: Option<serde_json::Value>,
+    #[serde(default)]
+    mal_id: Option<serde_json::Value>,
+}
+
+/// An id that may arrive as a number or a numeric string; anything else is absent.
+fn lenient_id(value: &Option<serde_json::Value>) -> Option<i64> {
+    match value.as_ref()? {
+        serde_json::Value::Number(n) => n.as_i64(),
+        serde_json::Value::String(s) => s.trim().parse().ok(),
+        _ => None,
+    }
 }
 
 impl MangaDetailsDto {
@@ -355,6 +369,8 @@ impl MangaDetailsDto {
             author,
             description: self.synopsis_html.as_deref().map(strip_html),
             status: self.status.as_deref().and_then(map_status),
+            anilist_id: lenient_id(&self.anilist_id),
+            mal_id: lenient_id(&self.mal_id),
             ..Default::default()
         }
     }

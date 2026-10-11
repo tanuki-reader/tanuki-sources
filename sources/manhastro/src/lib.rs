@@ -292,6 +292,8 @@ impl MangaDto {
                 .as_deref()
                 .or(self.ultimo_capitulo.as_deref())
                 .and_then(parse_datetime_millis),
+            // Manhastro links to no other site, so its series are matched by title search instead.
+            ..Default::default()
         }
     }
 
