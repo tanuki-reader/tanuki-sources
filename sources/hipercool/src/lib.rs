@@ -69,12 +69,12 @@ impl Source for Hipercool {
             name: "Hipercool".to_string(),
             lang: "pt-BR".to_string(),
             base_url: Some(BASE.to_string()),
-            version: Some(2),
+            version: Some(3),
             // The site's icon is an .ico the app's loader can't decode, and it publishes no raster
             // logo; a lettered avatar is the correct fallback until one turns up.
             icon_url: None,
             nsfw: true,
-            listings: vec![Listing::Popular, Listing::Latest],
+            listings: vec![Listing::Popular, Listing::Latest, Listing::New],
         }
     }
 
@@ -85,8 +85,10 @@ impl Source for Hipercool {
         let query = request.query.as_deref().map(str::trim).unwrap_or_default();
         let sort = match request.listing {
             Some(Listing::Latest) => "recent",
-            // Popular, and the default catalog when no listing was asked for.
-            _ => "popular",
+            Some(Listing::Popular) => "popular",
+            Some(Listing::New) => "newest",
+            // The default catalog ("All series"): A–Z, so it doesn't repeat another listing.
+            None => "alphabetical",
         };
 
         // `meta.values` is tRPC's marker for "this key was literally `undefined`, not null". The server

@@ -166,7 +166,10 @@ pub struct SourceHome {
 /// `Wire.SourceHomeRequest`.
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
-pub struct SourceHomeRequest {}
+pub struct SourceHomeRequest {
+    /// Same meaning as [`MangaListRequest::allow_sensitive`].
+    pub allow_sensitive: bool,
+}
 
 /// One page of catalog results. Mirrors `Wire.MangaPageWire`.
 #[derive(Serialize, Default)]
@@ -226,6 +229,10 @@ pub struct MangaListRequest {
     /// (see [`lenient_listing`]) rather than failing the whole request.
     #[serde(deserialize_with = "lenient_listing")]
     pub listing: Option<Listing>,
+    /// Whether the user allows sensitive (adult) content. `false` — also what an older host that never
+    /// sends it means — asks a source with mixed content to leave it out, through the site's own filter
+    /// where it has one, so pages stay full.
+    pub allow_sensitive: bool,
 }
 
 /// Decodes [`MangaListRequest::listing`], degrading an unrecognized value to `None` — a guest built

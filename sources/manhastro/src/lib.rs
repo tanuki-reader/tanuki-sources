@@ -69,11 +69,12 @@ impl Source for Manhastro {
             name: "Manhastro".to_string(),
             lang: "pt-BR".to_string(),
             base_url: Some(BASE.to_string()),
-            version: Some(2),
+            version: Some(3),
             icon_url: Some(ICON_URL.to_string()),
             // The catalog mixes all-ages series with adult ones and the site has no content-rating
             // filter to separate them, so the source as a whole is flagged.
-            nsfw: true,
+            // Mixed, not adult-only: each title carries its own `adulta` flag (see manga_list).
+            nsfw: false,
             listings: vec![Listing::Popular, Listing::Latest],
         }
     }
@@ -90,7 +91,7 @@ impl Source for Manhastro {
             let params = [("page", page.to_string()), ("nome", query.to_string())];
             let response: ApiResponse<Vec<MangaDto>> =
                 get_json(&format!("{API_BASE}/dados?{}", query_string(&params)))?;
-            return Ok(response.to_page());
+            return Ok(response.to_page(request.allow_sensitive));
         }
 
         let path = match request.listing {
@@ -103,7 +104,7 @@ impl Source for Manhastro {
 
         // `/lancamentos` is a feed of chapter releases keyed by series, so one series appears once per
         // recent chapter. Collapse it, or Latest shows the same cover several times.
-        let mut page_result = response.to_page();
+        let mut page_result = response.to_page(request.allow_sensitive);
         if matches!(request.listing, Some(Listing::Latest)) {
             let mut seen = Vec::new();
             page_result.entries.retain(|manga| {
@@ -207,9 +208,16 @@ struct ApiResponse<T> {
 }
 
 impl ApiResponse<Vec<MangaDto>> {
-    fn to_page(&self) -> MangaPage {
+    /// The page, minus adult titles unless the user allows them. The API has no adult filter, so this
+    /// one is client-side: a page can come back shorter than the site's, never with a hole the user sees.
+    fn to_page(&self, allow_sensitive: bool) -> MangaPage {
         MangaPage {
-            entries: self.data.iter().map(MangaDto::to_wire).collect(),
+            entries: self
+                .data
+                .iter()
+                .filter(|manga| allow_sensitive || !manga.adulta)
+                .map(MangaDto::to_wire)
+                .collect(),
             has_next_page: self.meta.as_ref().map_or(false, |meta| meta.has_more),
         }
     }
@@ -241,6 +249,9 @@ struct MangaDto {
     status: Option<String>,
     #[serde(default)]
     generos: Vec<String>,
+    /// Whether the title is adult content.
+    #[serde(default)]
+    adulta: bool,
     /// When the series last got a chapter ("yyyy-MM-dd HH:mm:ss", UTC like every date here).
     #[serde(default)]
     ultimo_capitulo: Option<String>,

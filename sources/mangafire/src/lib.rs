@@ -71,12 +71,12 @@ impl Source for MangaFire {
             lang: language::ABI_TAG.to_string(),
             base_url: Some(BASE.to_string()),
             // v2 makes the language a build-time choice, adding the pt-BR bundle.
-            version: Some(3),
+            version: Some(4),
             // TODO(icon): point at a raster (PNG/WebP) MangaFire icon; the favicon is an .ico the loader
             // can't decode, so None (lettered avatar) is correct until a raster URL is confirmed.
             icon_url: None,
             nsfw: false,
-            listings: vec![Listing::Popular, Listing::Latest],
+            listings: vec![Listing::Popular, Listing::Latest, Listing::New],
         }
     }
 
@@ -92,8 +92,19 @@ impl Source for MangaFire {
             }
             _ => match request.listing {
                 Some(Listing::Latest) => params.push(("order[chapter_updated_at]", "desc".to_string())),
-                _ => params.push(("order[views_30d]", "desc".to_string())),
+                Some(Listing::Popular) => params.push(("order[views_30d]", "desc".to_string())),
+                // The site's "Recently Added".
+                Some(Listing::New) => params.push(("order[created_at]", "desc".to_string())),
+                // The default catalog ("All series"): A–Z. The site's own "Browse all titles" defaults to
+                // recently updated, which would only repeat Latest.
+                None => params.push(("order[title]", "asc".to_string())),
             },
+        }
+        // The site's own default filter (safe + suggestive) unless the user allows sensitive content;
+        // without it the catalog includes ~13k erotica titles.
+        if !request.allow_sensitive {
+            params.push(("content_rating[]", "safe".to_string()));
+            params.push(("content_rating[]", "suggestive".to_string()));
         }
 
         let response: ApiList<MangaDto> = signed_get("/api/titles", &params)?;
@@ -294,6 +305,10 @@ struct MangaDto {
     title: String,
     #[serde(default)]
     poster: Option<PosterDto>,
+    /// Number of the newest chapter. (Its `chapterUpdatedAt` is relative text like "5d ago", and a
+    /// source has no clock to turn it into a date, so the update time is left out.)
+    #[serde(default)]
+    latest_chapter: Option<f64>,
 }
 
 impl MangaDto {
@@ -303,6 +318,7 @@ impl MangaDto {
             url: Some(manga_url(&self.hid, self.slug.as_deref())),
             title: self.title.clone(),
             cover_url: self.poster.as_ref().and_then(PosterDto::best),
+            latest_chapter: self.latest_chapter,
             ..Default::default()
         }
     }

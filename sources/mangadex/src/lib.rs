@@ -101,7 +101,7 @@ impl Source for MangaDex {
             // v4 adds manga_details and trims browse to the fields the grid actually renders;
             // v5 adds chapter_pages (page images via the at-home server);
             // v6 makes the language a build-time choice, adding the pt-BR bundle.
-            version: Some(7),
+            version: Some(8),
             icon_url: Some(ICON_URL.to_string()),
             nsfw: false,
             // Both of the contract's listings map onto a MangaDex sort order — see build_list_url.
@@ -221,9 +221,10 @@ fn get_json<T: DeserializeOwned>(url: &str) -> Result<T, AbiError> {
 /// Builds the `/manga` request URL for a browse/search page.
 ///
 /// A non-blank query searches by `title` (relevance order, MangaDex's default). Otherwise the requested
-/// listing chooses the sort: [`Listing::Latest`] by most-recent chapter, [`Listing::Popular`] (and the
-/// no-listing default) by follower count. `contentRating` is capped at safe+suggestive for now — an explicit-content toggle
-/// can widen it later.
+/// listing chooses the sort: [`Listing::Latest`] by most-recent chapter, [`Listing::Popular`] by follower
+/// count, [`Listing::New`] by creation date, and the no-listing default A–Z. `contentRating` is
+/// safe+suggestive unless the user allows sensitive content (`allow_sensitive`), which adds the explicit
+/// ratings.
 fn build_list_url(request: &MangaListRequest) -> String {
     let page = request.page.max(1);
     let offset = (page - 1) * PAGE_SIZE;
@@ -233,6 +234,9 @@ fn build_list_url(request: &MangaListRequest) -> String {
          &includes[]=cover_art&includes[]=author\
          &contentRating[]=safe&contentRating[]=suggestive"
     );
+    if request.allow_sensitive {
+        url.push_str("&contentRating[]=erotica&contentRating[]=pornographic");
+    }
 
     match request.query.as_deref() {
         Some(query) if !query.trim().is_empty() => {
@@ -243,8 +247,9 @@ fn build_list_url(request: &MangaListRequest) -> String {
             let order = match request.listing {
                 Some(Listing::Latest) => "order[latestUploadedChapter]=desc",
                 Some(Listing::New) => "order[createdAt]=desc",
-                // Popular, and the default catalog when no listing was asked for.
-                _ => "order[followedCount]=desc",
+                Some(Listing::Popular) => "order[followedCount]=desc",
+                // The default catalog ("All series"): A–Z, so it doesn't repeat another listing.
+                None => "order[title]=asc",
             };
             url.push('&');
             url.push_str(order);
@@ -264,8 +269,9 @@ fn build_details_url(manga_key: &str) -> String {
 
 /// Builds one page of the `/manga/{id}/feed` request URL.
 ///
-/// Filtered to this source's [`LANG`] and the same safe+suggestive content ratings as browse (the feed
-/// would otherwise default to a wider set than the catalog that led here). Ordered ascending by
+/// Filtered to this source's [`LANG`], across every content rating: the series is already chosen (the
+/// browse filter decided whether it could be seen), and a chapter feed narrower than the series would
+/// show an explicit series with no chapters. Ordered ascending by
 /// volume then chapter so the walk is stable across requests, and `includes[]=scanlation_group` inlines
 /// the translating group so the scanlator arrives without a second call.
 fn build_feed_url(manga_key: &str, offset: i32) -> String {
@@ -273,6 +279,7 @@ fn build_feed_url(manga_key: &str, offset: i32) -> String {
         "{API_BASE}/manga/{}/feed?limit={FEED_PAGE_SIZE}&offset={offset}\
          &translatedLanguage[]={LANG}&includes[]=scanlation_group\
          &contentRating[]=safe&contentRating[]=suggestive\
+         &contentRating[]=erotica&contentRating[]=pornographic\
          &order[volume]=asc&order[chapter]=asc",
         percent_encode(manga_key),
     )
