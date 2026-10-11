@@ -148,6 +148,10 @@ pub struct Manga {
     /// The series' MyAnimeList id, when the source links to it. Same purpose as [`Manga::anilist_id`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mal_id: Option<i64>,
+    /// The series' MangaDex id (a UUID), when the source links to it. Optional: lets the app show the
+    /// series' title and synopsis in the source's language, and its volume covers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mangadex_id: Option<String>,
 }
 
 /// One section of a source's home, returned by the optional `source_home` export. Mirrors
