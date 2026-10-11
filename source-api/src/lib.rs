@@ -152,6 +152,13 @@ pub trait Source {
     fn chapter_pages(_request: ChapterPagesRequest) -> Result<Vec<Page>, AbiError> {
         Err(AbiError::unsupported("chapter_pages"))
     }
+
+    /// Optional: the first page of several listings in one call, for the app's source home. Leave it
+    /// unimplemented and the app calls [`Source::manga_list`] once per declared listing instead —
+    /// implement it only when the site serves those sections together (one request instead of several).
+    fn home(_request: SourceHomeRequest) -> Result<SourceHome, AbiError> {
+        Err(AbiError::unsupported("source_home"))
+    }
 }
 
 /// Generates the `#[no_mangle]` exports the host calls, delegating to your [`Source`] impl.
@@ -222,6 +229,14 @@ macro_rules! export_source {
             $crate::__internal::respond(
                 $crate::__internal::decode(ptr, len)
                     .and_then(<$source as $crate::Source>::chapter_pages),
+            )
+        }
+
+        #[no_mangle]
+        pub extern "C" fn source_home(ptr: i32, len: i32) -> i64 {
+            $crate::__internal::respond(
+                $crate::__internal::decode(ptr, len)
+                    .and_then(<$source as $crate::Source>::home),
             )
         }
     };

@@ -85,7 +85,7 @@ pub struct SourceMeta {
 /// and receives one back in [`MangaListRequest::listing`]. That is what lets the app know up front what
 /// a source can be asked for — it only decides *which* of a known set to show (both, one, or neither).
 ///
-/// Travels as its lowercase name (`"popular"`, `"latest"`), per the ABI's "enums travel as their string
+/// Travels as its lowercase name (`"popular"`, `"latest"`, `"new"`), per the ABI's "enums travel as their string
 /// name" rule, so adding a variant later doesn't disturb the existing two.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -94,6 +94,9 @@ pub enum Listing {
     Popular,
     /// The source's most recently updated series.
     Latest,
+    /// Series most recently *added* to the source (by creation date, not by update). Optional: declare
+    /// it only if the source can sort that way.
+    New,
 }
 
 /// A catalog/search entry. Mirrors `Wire.MangaWire`.
@@ -125,7 +128,45 @@ pub struct Manga {
     /// anything unrecognized maps to `UNKNOWN` host-side rather than failing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
+    /// Number of the newest chapter (`222`, `10.5`), when the listing already shows it. Optional and
+    /// additive: the app uses it for "Ch. 222" captions on its Latest rail.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_chapter: Option<f64>,
+    /// The newest chapter's own name, for sources that don't number chapters. Optional.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_chapter_name: Option<String>,
+    /// When the series last got a chapter, Unix epoch **milliseconds**. Optional; send `None`, not `0`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<i64>,
+    /// Genre/tag names as the source shows them. Optional (empty = none); the app shows a few.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub genres: Vec<String>,
 }
+
+/// One section of a source's home, returned by the optional `source_home` export. Mirrors
+/// `Wire.SourceHomeSectionWire`. Keyed by the contract's closed [`Listing`] set, so the app owns the
+/// section's label and order — a source can't invent a section.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HomeSection {
+    pub listing: Listing,
+    pub entries: Vec<Manga>,
+}
+
+/// Output of the optional `source_home` export: the first page of several listings in one call. A
+/// source that doesn't implement it gets the app's fallback (one `manga_list` per declared listing).
+/// Mirrors `Wire.SourceHomeWire`.
+#[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceHome {
+    pub sections: Vec<HomeSection>,
+}
+
+/// Input to `source_home`; empty today, a struct so it can grow optional fields. Mirrors
+/// `Wire.SourceHomeRequest`.
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SourceHomeRequest {}
 
 /// One page of catalog results. Mirrors `Wire.MangaPageWire`.
 #[derive(Serialize, Default)]
@@ -197,6 +238,7 @@ fn lenient_listing<'de, D: serde::Deserializer<'de>>(
     Ok(raw.and_then(|name| match name.as_str() {
         "popular" => Some(Listing::Popular),
         "latest" => Some(Listing::Latest),
+        "new" => Some(Listing::New),
         _ => None,
     }))
 }

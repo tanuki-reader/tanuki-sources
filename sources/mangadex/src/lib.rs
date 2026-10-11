@@ -101,11 +101,11 @@ impl Source for MangaDex {
             // v4 adds manga_details and trims browse to the fields the grid actually renders;
             // v5 adds chapter_pages (page images via the at-home server);
             // v6 makes the language a build-time choice, adding the pt-BR bundle.
-            version: Some(6),
+            version: Some(7),
             icon_url: Some(ICON_URL.to_string()),
             nsfw: false,
             // Both of the contract's listings map onto a MangaDex sort order — see build_list_url.
-            listings: vec![Listing::Popular, Listing::Latest],
+            listings: vec![Listing::Popular, Listing::Latest, Listing::New],
         }
     }
 
@@ -242,6 +242,7 @@ fn build_list_url(request: &MangaListRequest) -> String {
         _ => {
             let order = match request.listing {
                 Some(Listing::Latest) => "order[latestUploadedChapter]=desc",
+                Some(Listing::New) => "order[createdAt]=desc",
                 // Popular, and the default catalog when no listing was asked for.
                 _ => "order[followedCount]=desc",
             };
@@ -342,7 +343,19 @@ fn map_list_manga(api: &ApiManga<ListAttributes>) -> Manga {
         author: api.author(),
         description: None,
         status: api.attributes.status.clone(),
+        genres: genres(&api.attributes.tags),
+        // `lastChapter` is MangaDex's *final* chapter (set once a series ends), not its newest, so it
+        // can't stand in for `latest_chapter`; that one stays unset.
+        ..Default::default()
     }
+}
+
+/// The genre names among a series' tags (MangaDex also tags formats and themes), in English.
+fn genres(tags: &[ApiTag]) -> Vec<String> {
+    tags.iter()
+        .filter(|tag| tag.attributes.group == "genre")
+        .filter_map(|tag| tag.attributes.name.get("en").cloned())
+        .collect()
 }
 
 /// Maps the single-entity `/manga/{id}` response to a full wire [`Manga`] — [`map_list_manga`] plus the
@@ -360,6 +373,7 @@ fn map_detail_manga(api: &ApiManga<DetailAttributes>) -> Manga {
         author: api.author(),
         description: pick_localized(&attrs.description),
         status: attrs.status.clone(),
+        ..Default::default()
     }
 }
 
@@ -493,6 +507,23 @@ struct ListAttributes {
     alt_titles: Vec<BTreeMap<String, String>>,
     #[serde(default)]
     status: Option<String>,
+    #[serde(default)]
+    tags: Vec<ApiTag>,
+}
+
+/// One of a series' tags; only `group == "genre"` ones become genres.
+#[derive(Deserialize, Default)]
+struct ApiTag {
+    #[serde(default)]
+    attributes: ApiTagAttributes,
+}
+
+#[derive(Deserialize, Default)]
+struct ApiTagAttributes {
+    #[serde(default)]
+    name: BTreeMap<String, String>,
+    #[serde(default)]
+    group: String,
 }
 
 /// The full attribute set, parsed only by [`MangaDex::manga_details`] — one series, not twenty.

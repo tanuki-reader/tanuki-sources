@@ -69,7 +69,7 @@ impl Source for Manhastro {
             name: "Manhastro".to_string(),
             lang: "pt-BR".to_string(),
             base_url: Some(BASE.to_string()),
-            version: Some(1),
+            version: Some(2),
             icon_url: Some(ICON_URL.to_string()),
             // The catalog mixes all-ages series with adult ones and the site has no content-rating
             // filter to separate them, so the source as a whole is flagged.
@@ -96,8 +96,8 @@ impl Source for Manhastro {
         let path = match request.listing {
             Some(Listing::Latest) => "/lancamentos".to_string(),
             Some(Listing::Popular) => "/rank/diario".to_string(),
-            // No listing asked for: the plain paginated catalog.
-            None => format!("/dados?page={page}"),
+            // No listing asked for (or `New`, which this source doesn't declare): the plain catalog.
+            Some(Listing::New) | None => format!("/dados?page={page}"),
         };
         let response: ApiResponse<Vec<MangaDto>> = get_json(&format!("{API_BASE}{path}"))?;
 
@@ -239,6 +239,16 @@ struct MangaDto {
     imagem: Option<String>,
     #[serde(default)]
     status: Option<String>,
+    #[serde(default)]
+    generos: Vec<String>,
+    /// When the series last got a chapter ("yyyy-MM-dd HH:mm:ss", UTC like every date here).
+    #[serde(default)]
+    ultimo_capitulo: Option<String>,
+    /// Only on `/lancamentos` rows: the release this row announces.
+    #[serde(default)]
+    capitulo_nome: Option<String>,
+    #[serde(default)]
+    capitulo_data: Option<String>,
 }
 
 impl MangaDto {
@@ -262,6 +272,15 @@ impl MangaDto {
             // Manhastro's catalog carries no author field, and `scan_atual` (the translating group) is
             // null on nearly every record, so neither is worth reading.
             author: None,
+            genres: self.generos.iter().filter_map(|g| non_empty(g)).collect(),
+            // A `/lancamentos` row names its release; elsewhere only the date of the newest is known.
+            latest_chapter: self.capitulo_nome.as_deref().and_then(first_number),
+            latest_chapter_name: self.capitulo_nome.as_deref().and_then(non_empty),
+            updated_at: self
+                .capitulo_data
+                .as_deref()
+                .or(self.ultimo_capitulo.as_deref())
+                .and_then(parse_datetime_millis),
         }
     }
 

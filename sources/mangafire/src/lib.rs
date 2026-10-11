@@ -71,7 +71,7 @@ impl Source for MangaFire {
             lang: language::ABI_TAG.to_string(),
             base_url: Some(BASE.to_string()),
             // v2 makes the language a build-time choice, adding the pt-BR bundle.
-            version: Some(2),
+            version: Some(3),
             // TODO(icon): point at a raster (PNG/WebP) MangaFire icon; the favicon is an .ico the loader
             // can't decode, so None (lettered avatar) is correct until a raster URL is confirmed.
             icon_url: None,
