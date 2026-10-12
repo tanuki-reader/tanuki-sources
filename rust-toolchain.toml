@@ -1,0 +1,5 @@
+# Pinned so a compiler change can't alter a bundle's bytes under the same source version (CI refuses
+# that as a missing version bump).
+[toolchain]
+channel = "1.97.1"
+targets = ["wasm32-unknown-unknown"]

@@ -1,0 +1,16 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Builds, validates and signs the tanuki-sources repo index."
+
+[dependencies]
+tanuki-source-api = { path = "../source-api" }
+wasmi = "1.1.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+sha2 = "0.10"
+ed25519-dalek = "2"
+base64 = "0.22"

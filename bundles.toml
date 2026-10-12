@@ -1,0 +1,29 @@
+name = "Tanuki Sources"
+
+# The bundles CI publishes. `id` must equal the bundle's `meta().id`; `feature` selects a language
+# build of a multi-language crate (built with --no-default-features). Crates not listed here (hello,
+# manhastro) still build, but aren't published.
+
+[[bundle]]
+id = "mangadex"
+crate = "mangadex"
+feature = "lang-en"
+
+[[bundle]]
+id = "mangadex-pt-br"
+crate = "mangadex"
+feature = "lang-pt-br"
+
+[[bundle]]
+id = "mangafire"
+crate = "mangafire"
+feature = "lang-en"
+
+[[bundle]]
+id = "mangafire-pt-br"
+crate = "mangafire"
+feature = "lang-pt-br"
+
+[[bundle]]
+id = "hipercool"
+crate = "hipercool"

@@ -1,15 +1,18 @@
-# native/
+# tanuki-sources
 
-Rust code, for two unrelated reasons.
+First-party sources for [Tanuki](https://github.com/tanuki-reader/tanuki), plus the guest-side SDK
+they compile against. Each source is a Rust crate built to a `.wasm` bundle. CI validates and signs
+the bundles and publishes them as a static repo the app installs from.
 
-| Directory | What | Why Rust |
-|---|---|---|
-| `wasmi-cabi/` | C-ABI shim over the [wasmi](https://github.com/wasmi-labs/wasmi) interpreter | iOS has no WASM engine and can't JIT; Kotlin/Native can only call C |
-| `source-api/` | Guest-side SDK every `.wasm` source compiles against | Guests must be linear-memory WASM (see below) |
-| `sources/` | First-party sources, compiled to `.wasm` | same |
+| Directory | What |
+|---|---|
+| `source-api/` | The SDK: the ABI (`abi.rs`), the wire types (`wire.rs`), `export_source!`, and the golden wire fixtures (`fixtures/v<ABI>/`) the app tests against too |
+| `sources/<crate>/` | One crate per site. A crate can yield several bundles through cargo features (`mangadex` → `mangadex`, `mangadex-pt-br`) |
+| `bundles.toml` | The **published** bundles: id, crate, feature |
+| `xtask/` | Build → validate → write and sign the index |
 
-`wasmi-cabi` is part of the **host**; `source-api` and `sources` are **guests**. They never
-reference each other — they meet at the ABI, over JSON.
+The app ([`tanuki-reader/tanuki`](https://github.com/tanuki-reader/tanuki)) mounts this repo as a
+submodule at `native/tanuki-sources` and builds its engine-test fixtures from it.
 
 ## Why sources aren't written in Kotlin
 
@@ -28,23 +31,8 @@ So a guest must be a language that compiles to linear-memory WASM: Rust, Assembl
 ## Setup
 
 ```bash
-# once
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-rustup target add wasm32-unknown-unknown        # for sources
-rustup target add aarch64-apple-ios aarch64-apple-ios-sim   # for wasmi-cabi
-```
-
-## Building
-
-Sources are built automatically by Gradle — `:shared:buildDevSources` compiles each crate in
-`sources/` and copies the `.wasm` into `shared/src/androidMain/resources/sources/`,
-where `DevSourceInstaller` picks it up on launch.
-
-The task **skips itself** if cargo isn't installed, so Android-only contributors don't need Rust.
-
-```bash
-./gradlew :shared:buildDevSources     # explicit rebuild
-cd sources/hello && cargo build --release --target wasm32-unknown-unknown   # manual
+# rust-toolchain.toml pins the compiler and adds the wasm32-unknown-unknown target on first use.
 ```
 
 ## Writing a source
@@ -56,16 +44,53 @@ and has no `unsafe`.
 All `unsafe` lives in `source-api/src/abi.rs` (~60 lines: the allocator, pointer packing, and the two
 host imports). A source never touches it.
 
+To publish it, add a `[[bundle]]` to `bundles.toml`.
+
 ### Rules
 
 - **Never panic.** A panic aborts the module and the host sees an opaque trap. Return `AbiError`.
-- **Bump `version` in `meta()`** on every release — it's what drives update detection.
+- **Bump `version` in `meta()`** whenever the bundle changes. It's what drives update detection, and
+  CI refuses to publish changed bytes under an already-published version. `Cargo.toml` versions are
+  not used.
+- **`meta().id` must equal the bundle id** in `bundles.toml`. CI checks it.
 - **`Wire.kt` and `wire.rs` must agree.** Both test against the golden JSON in
-  `source-api/fixtures/v<ABI>/` (`cargo test` here, `WireFixtureTest` in `:core:source`). Change a wire
-  shape → update the fixture, then both sides, in one commit.
+  `source-api/fixtures/v<ABI>/` (`cargo test` here, `WireFixtureTest` in the app's `:core:source`).
+  Change a wire shape → update the fixture, then both sides.
 - **Listings are the contract's, not yours.** `meta()` declares which of the `Listing` variants
-  (`Popular`, `Latest`) your source serves — you can't invent one or label it. The app owns the tab
-  name so it can be translated. Serve none and the app shows your default catalog with no tabs.
+  (`Popular`, `Latest`, `New`) your source serves — you can't invent one or label it. The app owns the
+  tab name so it can be translated. Serve none and the app shows your default catalog with no tabs.
 - **Only a breaking change bumps the ABI.** A new optional field or export keeps `ABI_VERSION`. A
-  breaking one bumps `ABI_VERSION` and `SourceAbi.VERSION` together; the host runs
+  breaking one bumps `ABI_VERSION` here and `SourceAbi.VERSION` in the app; the app runs
   `SourceAbi.MIN_SUPPORTED..VERSION` and refuses anything outside it at load time.
+
+## Publishing
+
+Every push to `main` runs `.github/workflows/publish.yml`. It runs the tests, then
+`xtask build --previous <last published>`, which for each bundle in `bundles.toml`:
+
+1. builds it to `wasm32-unknown-unknown`;
+2. instantiates it (wasmi), checks the required exports and `abi_version()`, and reads `source_meta`;
+3. refuses changed bytes under a version that's already published;
+4. writes `wasm/<id>-v<version>.wasm` and an entry in `index.json` (metadata comes from the binary, so
+   the index can't drift from it);
+5. signs `index.json` with ed25519 (`index.json.sig`, base64) and writes `repo.json` with the public
+   key.
+
+The output is force-pushed to the orphan **`repo`** branch and served by GitHub Pages
+(`https://tanuki-reader.github.io/tanuki-sources/`), with jsDelivr as a mirror
+(`https://cdn.jsdelivr.net/gh/tanuki-reader/tanuki-sources@repo/`). Users add the repo by URL in
+the app.
+
+**Signing key:** `cargo run --manifest-path xtask/Cargo.toml -- keygen` prints a seed and its public
+key. Store the seed as the `TANUKI_SIGNING_KEY` Actions secret; never commit it. Changing the key makes
+every app that pinned the old one reject the repo.
+
+### Local repo for the dev loop
+
+```bash
+cargo run --manifest-path xtask/Cargo.toml -- build --out out   # unsigned without TANUKI_SIGNING_KEY
+python3 -m http.server -d out 8080
+```
+
+Add `http://10.0.2.2:8080` (Android emulator) or `http://localhost:8080` (iOS simulator) as a repo in
+a debug build of the app.

@@ -1,0 +1,51 @@
+# Tests, builds and validates every bundle; on main, also signs the index and publishes the static repo
+# to the orphan `repo` branch (served by GitHub Pages and jsDelivr). See README → Publishing.
+name: publish
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # rust-toolchain.toml pins the compiler and the wasm32 target; rustup installs it on first use.
+      - name: Tests
+        run: |
+          (cd source-api && cargo test --locked)
+          (cd xtask && cargo test --locked)
+
+      - name: Last published repo
+        run: |
+          if git fetch --depth 1 origin repo; then git worktree add prev FETCH_HEAD; else mkdir prev; fi
+
+      - name: Build and validate
+        env:
+          TANUKI_SIGNING_KEY: ${{ github.event_name == 'push' && secrets.TANUKI_SIGNING_KEY || '' }}
+        run: |
+          if [ "${{ github.event_name }}" = push ] && [ -z "$TANUKI_SIGNING_KEY" ]; then
+            echo "::error::TANUKI_SIGNING_KEY secret is not set"; exit 1
+          fi
+          cargo run --locked --manifest-path xtask/Cargo.toml -- build --out out --previous prev
+
+      - name: Publish to the repo branch
+        if: github.event_name == 'push'
+        run: |
+          cd out
+          touch .nojekyll
+          git init -q -b repo
+          git add -A
+          git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com \
+            commit -q -m "Publish ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" repo
