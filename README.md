@@ -85,6 +85,10 @@ the app.
 key. Store the seed as the `TANUKI_SIGNING_KEY` Actions secret; never commit it. Changing the key makes
 every app that pinned the old one reject the repo.
 
+The current seed is backed up in the maintainer's macOS Keychain, item **"tanuki-sources signing key"**
+(account `tanuki-reader`). To restore it:
+`security find-generic-password -a tanuki-reader -s "tanuki-sources signing key" -w | gh secret set TANUKI_SIGNING_KEY`.
+
 ### Local repo for the dev loop
 
 ```bash
