@@ -1,0 +1,21 @@
+[package]
+name = "tanuki-source-nexusmangas"
+version = "0.1.0"
+edition = "2021"
+description = "Nexus Mangás source for Tanuki — pt-BR, a Supabase (PostgREST) JSON API."
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+tanuki-source-api = { path = "../../source-api" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The page list is a POST, and `HttpRequest::body_base64` wants its body base64-encoded.
+base64 = { version = "0.22", default-features = false, features = ["alloc"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true

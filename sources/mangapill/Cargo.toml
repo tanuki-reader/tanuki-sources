@@ -1,0 +1,17 @@
+[package]
+name = "tanuki-source-mangapill"
+version = "0.1.0"
+edition = "2021"
+description = "MangaPill source for Tanuki — en, plain HTML scraped with string slicing."
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+tanuki-source-api = { path = "../../source-api" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true

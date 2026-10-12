@@ -27,3 +27,11 @@ feature = "lang-pt-br"
 [[bundle]]
 id = "hipercool"
 crate = "hipercool"
+
+[[bundle]]
+id = "mangapill"
+crate = "mangapill"
+
+[[bundle]]
+id = "nexusmangas"
+crate = "nexusmangas"
