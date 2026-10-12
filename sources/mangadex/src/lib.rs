@@ -101,7 +101,7 @@ impl Source for MangaDex {
             // v4 adds manga_details and trims browse to the fields the grid actually renders;
             // v5 adds chapter_pages (page images via the at-home server);
             // v6 makes the language a build-time choice, adding the pt-BR bundle.
-            version: Some(9),
+            version: Some(10),
             icon_url: Some(ICON_URL.to_string()),
             nsfw: false,
             // Both of the contract's listings map onto a MangaDex sort order — see build_list_url.

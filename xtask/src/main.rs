@@ -113,7 +113,7 @@ fn main() {
 }
 
 fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
+    Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().canonicalize().unwrap()
 }
 
 fn flag(args: &[String], name: &str) -> Option<PathBuf> {
@@ -175,6 +175,13 @@ fn cargo_build(root: &Path, bundle: &Bundle) -> Result<Vec<u8>> {
     let mut cargo = Command::new(env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
     cargo.current_dir(&crate_dir).args(["build", "--release", "--target", WASM_TARGET]);
     cargo.arg("--target-dir").arg(&target_dir);
+    // Panic locations embed source paths; remap them so the bytes don't depend on the machine (CI vs a
+    // laptop) or leak a home directory into a published binary.
+    let cargo_home = env::var("CARGO_HOME").unwrap_or_else(|_| format!("{}/.cargo", env::var("HOME").unwrap_or_default()));
+    cargo.env(
+        "RUSTFLAGS",
+        format!("--remap-path-prefix={}=/tanuki-sources --remap-path-prefix={cargo_home}=/cargo", root.display()),
+    );
     if let Some(feature) = &bundle.feature {
         cargo.args(["--no-default-features", "--features", feature]);
     }

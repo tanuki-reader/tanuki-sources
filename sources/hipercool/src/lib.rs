@@ -69,7 +69,7 @@ impl Source for Hipercool {
             name: "Hipercool".to_string(),
             lang: "pt-BR".to_string(),
             base_url: Some(BASE.to_string()),
-            version: Some(3),
+            version: Some(4),
             // The site's icon is an .ico the app's loader can't decode, and it publishes no raster
             // logo; a lettered avatar is the correct fallback until one turns up.
             icon_url: None,
