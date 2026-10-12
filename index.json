@@ -1,0 +1,126 @@
+{
+  "formatVersion": 1,
+  "generatedAt": "2026-10-12T19:51:11Z",
+  "sources": [
+    {
+      "id": "mangadex",
+      "name": "MangaDex",
+      "lang": "en",
+      "version": 10,
+      "abi": 4,
+      "nsfw": false,
+      "baseUrl": "https://mangadex.org",
+      "listings": [
+        "popular",
+        "latest",
+        "new"
+      ],
+      "iconUrl": "https://mangadex.org/pwa/icons/icon-180.png",
+      "wasmPath": "wasm/mangadex-v10.wasm",
+      "sha256": "6e2d6d14142fc4440eb1d0ee91762b354ee82e152c022c667da154f3ff578417",
+      "size": 161110
+    },
+    {
+      "id": "mangadex-pt-br",
+      "name": "MangaDex",
+      "lang": "pt-BR",
+      "version": 10,
+      "abi": 4,
+      "nsfw": false,
+      "baseUrl": "https://mangadex.org",
+      "listings": [
+        "popular",
+        "latest",
+        "new"
+      ],
+      "iconUrl": "https://mangadex.org/pwa/icons/icon-180.png",
+      "wasmPath": "wasm/mangadex-pt-br-v10.wasm",
+      "sha256": "497369720e6779f14135a24e5227ed9967323d4812376824c929663c899a9688",
+      "size": 161126
+    },
+    {
+      "id": "mangafire",
+      "name": "MangaFire",
+      "lang": "en",
+      "version": 7,
+      "abi": 4,
+      "nsfw": false,
+      "baseUrl": "https://mangafire.to",
+      "listings": [
+        "popular",
+        "latest",
+        "new"
+      ],
+      "wasmPath": "wasm/mangafire-v7.wasm",
+      "sha256": "5ae815901fa28f620bc71416dbf14a0da48897ac1017e6525c26998da10eed58",
+      "size": 186685
+    },
+    {
+      "id": "mangafire-pt-br",
+      "name": "MangaFire",
+      "lang": "pt-BR",
+      "version": 7,
+      "abi": 4,
+      "nsfw": false,
+      "baseUrl": "https://mangafire.to",
+      "listings": [
+        "popular",
+        "latest",
+        "new"
+      ],
+      "wasmPath": "wasm/mangafire-pt-br-v7.wasm",
+      "sha256": "233988b66d5458afd4dacb3ec2c503233834cfec2a646d85d18fdca9b05e1559",
+      "size": 186737
+    },
+    {
+      "id": "hipercool",
+      "name": "Hipercool",
+      "lang": "pt-BR",
+      "version": 4,
+      "abi": 4,
+      "nsfw": true,
+      "baseUrl": "https://lerhentais.com",
+      "listings": [
+        "popular",
+        "latest",
+        "new"
+      ],
+      "wasmPath": "wasm/hipercool-v4.wasm",
+      "sha256": "61c3ad01a3e32b4e27a8fbfb89548e9c251f18792dc75615f3304dcf105913d1",
+      "size": 200832
+    },
+    {
+      "id": "mangapill",
+      "name": "MangaPill",
+      "lang": "en",
+      "version": 1,
+      "abi": 4,
+      "nsfw": false,
+      "baseUrl": "https://mangapill.com",
+      "listings": [
+        "popular",
+        "latest",
+        "new"
+      ],
+      "wasmPath": "wasm/mangapill-v1.wasm",
+      "sha256": "11beebe14b8fbd0063adc540c7372787fc8b0fe71940c81d3eab66bdbdc9ff0a",
+      "size": 132853
+    },
+    {
+      "id": "nexusmangas",
+      "name": "Nexus Mangás",
+      "lang": "pt-BR",
+      "version": 1,
+      "abi": 4,
+      "nsfw": false,
+      "baseUrl": "https://nexusmangas.com",
+      "listings": [
+        "popular",
+        "latest"
+      ],
+      "wasmPath": "wasm/nexusmangas-v1.wasm",
+      "sha256": "68ea4199483530f0ecb54891c38ee8787ed5cf3bd7b3ff3b29143910cecec077",
+      "size": 155525
+    }
+  ]
+}
