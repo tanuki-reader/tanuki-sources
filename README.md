@@ -96,10 +96,14 @@ The current seed is backed up in the maintainer's macOS Keychain, item **"tanuki
 
 ### Local repo for the dev loop
 
+The app only adds `https://`, signed repos, so sign with a throwaway key (`xtask keygen`, exported as
+`TANUKI_SIGNING_KEY`) and expose `out/` through an HTTPS tunnel:
+
 ```bash
-cargo run --manifest-path xtask/Cargo.toml -- build --out out   # unsigned without TANUKI_SIGNING_KEY
+cargo run --manifest-path xtask/Cargo.toml -- build --out out
 python3 -m http.server -d out 8080
+cloudflared tunnel --url http://localhost:8080   # add the printed https://….trycloudflare.com as a repo
 ```
 
-Add `http://10.0.2.2:8080` (Android emulator) or `http://localhost:8080` (iOS simulator) as a repo in
-a debug build of the app.
+Full steps and caveats (why not ngrok's free tier, reinstalling after a rebuild) are in `CLAUDE.md` under
+"Testing in the app".
