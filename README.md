@@ -65,6 +65,9 @@ To publish it, add a `[[bundle]]` to `bundles.toml`.
 
 ## Publishing
 
+The published layout, every field, and what the app checks are specified in
+[`docs/repo-format.md`](docs/repo-format.md).
+
 Every push to `main` runs `.github/workflows/publish.yml`. It runs the tests, then
 `xtask build --previous <last published>`, which for each bundle in `bundles.toml`:
 
