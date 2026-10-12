@@ -37,7 +37,7 @@ rustup target add aarch64-apple-ios aarch64-apple-ios-sim   # for wasmi-cabi
 ## Building
 
 Sources are built automatically by Gradle — `:shared:buildDevSources` compiles each crate in
-`sources/` and copies the `.wasm` into `shared/src/commonMain/composeResources/files/sources/`,
+`sources/` and copies the `.wasm` into `shared/src/androidMain/resources/sources/`,
 where `DevSourceInstaller` picks it up on launch.
 
 The task **skips itself** if cargo isn't installed, so Android-only contributors don't need Rust.
