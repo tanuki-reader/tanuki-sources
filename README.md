@@ -83,7 +83,9 @@ the app.
 
 **Signing key:** `cargo run --manifest-path xtask/Cargo.toml -- keygen` prints a seed and its public
 key. Store the seed as the `TANUKI_SIGNING_KEY` Actions secret; never commit it. Changing the key makes
-every app that pinned the old one reject the repo.
+every app that pinned the old one reject the repo. **The app also ships this key**
+(`RemoteSourceCatalog.PINNED_REPO_KEYS` in the app repo): rotate it only after an app release that carries
+the new key, or every install refuses the repo.
 
 The current seed is backed up in the maintainer's macOS Keychain, item **"tanuki-sources signing key"**
 (account `tanuki-reader`). To restore it:
