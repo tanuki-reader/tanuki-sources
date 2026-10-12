@@ -60,9 +60,12 @@ host imports). A source never touches it.
 
 - **Never panic.** A panic aborts the module and the host sees an opaque trap. Return `AbiError`.
 - **Bump `version` in `meta()`** on every release — it's what drives update detection.
-- **`Wire.kt` and `wire.rs` must agree.** Nothing enforces it. Change both in one commit.
+- **`Wire.kt` and `wire.rs` must agree.** Both test against the golden JSON in
+  `source-api/fixtures/v<ABI>/` (`cargo test` here, `WireFixtureTest` in `:core:source`). Change a wire
+  shape → update the fixture, then both sides, in one commit.
 - **Listings are the contract's, not yours.** `meta()` declares which of the `Listing` variants
   (`Popular`, `Latest`) your source serves — you can't invent one or label it. The app owns the tab
   name so it can be translated. Serve none and the app shows your default catalog with no tabs.
-- **Bump `ABI_VERSION` and `SourceAbi.VERSION` together.** The host refuses a mismatched guest at
-  load time, which is the intended failure — loud, not silent.
+- **Only a breaking change bumps the ABI.** A new optional field or export keeps `ABI_VERSION`. A
+  breaking one bumps `ABI_VERSION` and `SourceAbi.VERSION` together; the host runs
+  `SourceAbi.MIN_SUPPORTED..VERSION` and refuses anything outside it at load time.

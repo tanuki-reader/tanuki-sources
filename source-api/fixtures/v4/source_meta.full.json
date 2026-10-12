@@ -1,0 +1,10 @@
+{
+  "id": "mangadex",
+  "name": "MangaDex",
+  "lang": "en",
+  "baseUrl": "https://mangadex.org",
+  "version": 9,
+  "iconUrl": "https://mangadex.org/favicon.png",
+  "nsfw": true,
+  "listings": ["popular", "latest", "new"]
+}
